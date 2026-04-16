@@ -1,13 +1,6 @@
 {
-  "version": 2,
-  "builds": [
-    { "src": "api/index.py", "use": "@vercel/python" }
-  ],
-  "routes": [
-    { "src": "/api/(.*)", "dest": "/api/index.py" },
-    { "src": "/login", "dest": "/login.html" },
-    { "src": "/(.*\\.(js|css|ico|png|jpg|svg|webp|woff2?))", "dest": "/$1" },
-    { "src": "/", "dest": "/index.html" },
-    { "src": "/(.*)", "dest": "/api/index.py" }
+  "rewrites": [
+    { "source": "/login", "destination": "/login.html" },
+    { "source": "/api/:path*", "destination": "/api/index.py" }
   ]
 }
