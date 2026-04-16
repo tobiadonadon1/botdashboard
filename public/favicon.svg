@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="6" fill="#0a0e12"/>
+  <text x="16" y="23" text-anchor="middle" font-family="monospace" font-weight="700" font-size="22" fill="#58b580">€</text>
+  <rect x="2" y="2" width="28" height="28" rx="5" fill="none" stroke="#448c64" stroke-width="1" opacity="0.4"/>
+</svg>
