@@ -1,0 +1,42 @@
+# ── Secrets / local env ──
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+.session_secret
+users.json
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Vercel ──
+.vercel
+.vercel_build_output
+
+# ── Node (in case we add JS tooling) ──
+node_modules/
+dist/
+build/
+
+# ── OS / editor ──
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+
+# ── Data (never commit DB snapshots) ──
+*.db
+*.sqlite
+*.sqlite3
+data/

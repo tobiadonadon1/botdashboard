@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>POLYBOT // ACCESS</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<canvas id="matrix-rain"></canvas>
+
+<div class="login-wrapper">
+  <div class="login-card">
+    <div class="login-header">
+      <div class="login-logo">POLYBOT</div>
+      <div class="login-subtitle">Command Center // v2.0</div>
+    </div>
+
+    <form class="login-form" id="loginForm" autocomplete="off">
+      <div class="input-row">
+        <label for="username">User ID</label>
+        <input type="text" id="username" name="username" required
+               placeholder="enter identifier..." autocomplete="off" autofocus>
+      </div>
+      <div class="input-row">
+        <label for="password">Passkey</label>
+        <input type="password" id="password" name="password" required
+               placeholder="enter passkey..." autocomplete="current-password">
+      </div>
+      <button type="submit" class="btn" id="loginBtn">> Authenticate</button>
+      <div class="login-error" id="loginError">ACCESS DENIED</div>
+    </form>
+
+    <div class="login-footer">256-bit session // PBKDF2</div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('matrix-rain');
+const ctx = canvas.getContext('2d');
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+const chars = '01001101001010110100110101010011010101';
+const fontSize = 13;
+const cols = Math.floor(canvas.width / fontSize);
+const drops = Array(cols).fill(1);
+
+function drawMatrix() {
+  ctx.fillStyle = 'rgba(9, 11, 16, 0.07)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.font = fontSize + 'px JetBrains Mono, monospace';
+  for (let i = 0; i < drops.length; i++) {
+    const text = chars[Math.floor(Math.random() * chars.length)];
+    const x = i * fontSize;
+    const y = drops[i] * fontSize;
+    if (Math.random() > 0.97) {
+      ctx.fillStyle = '#6cd498';
+    } else {
+      ctx.fillStyle = '#448c64';
+    }
+    ctx.fillText(text, x, y);
+    if (y > canvas.height && Math.random() > 0.975) {
+      drops[i] = 0;
+    }
+    drops[i]++;
+  }
+}
+setInterval(drawMatrix, 55);
+
+const form = document.getElementById('loginForm');
+const errBox = document.getElementById('loginError');
+const btn = document.getElementById('loginBtn');
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  errBox.classList.remove('visible');
+  btn.disabled = true;
+  btn.textContent = '> authenticating...';
+
+  const username = document.getElementById('username').value.trim();
+  const password = document.getElementById('password').value;
+
+  try {
+    const res = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+      credentials: 'include',
+    });
+    if (res.ok) {
+      btn.textContent = '> granted';
+      setTimeout(() => window.location.href = '/', 300);
+      return;
+    }
+    const data = await res.json().catch(() => ({ detail: 'Access denied' }));
+    errBox.textContent = `ACCESS DENIED // ${data.detail || 'invalid credentials'}`;
+    errBox.classList.add('visible');
+  } catch (err) {
+    errBox.textContent = `SERVER ERROR // ${err.message}`;
+    errBox.classList.add('visible');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '> Authenticate';
+  }
+});
+</script>
+</body>
+</html>

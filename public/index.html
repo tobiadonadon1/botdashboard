@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>POLYBOT // COMMAND CENTER</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="topbar-logo">POLYBOT</div>
+    <div class="status-pill">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">--</span>
+    </div>
+    <div class="status-pill">
+      <span id="modeText">--</span>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="user-tag">USER: <span id="usernameTag">--</span></div>
+    <div class="user-tag"><span id="localTime">--</span></div>
+    <button class="logout-btn" id="logoutBtn">LOGOUT</button>
+  </div>
+</div>
+
+<div class="container">
+
+  <div class="grid">
+    <div class="card col-3">
+      <div class="card-header">
+        <span class="card-title">Today's P&L</span>
+        <span class="card-icon">$</span>
+      </div>
+      <div class="stat-big pos" id="todayPnl">$0.00</div>
+      <div class="stat-sub" id="todayPnlSub">-- trades today</div>
+    </div>
+
+    <div class="card col-3">
+      <div class="card-header">
+        <span class="card-title">Net P&L (All)</span>
+        <span class="card-icon">&Sigma;</span>
+      </div>
+      <div class="stat-big" id="netPnl">$0.00</div>
+      <div class="stat-sub" id="netPnlSub">--</div>
+    </div>
+
+    <div class="card col-3">
+      <div class="card-header">
+        <span class="card-title">Win Rate</span>
+        <span class="card-icon">%</span>
+      </div>
+      <div class="stat-big" id="winRate">--%</div>
+      <div class="stat-sub" id="winRateSub">last 20: -- %</div>
+    </div>
+
+    <div class="card col-3">
+      <div class="card-header">
+        <span class="card-title">Brier Score</span>
+        <span class="card-icon">&sigma;</span>
+      </div>
+      <div class="stat-big" id="brier">--</div>
+      <div class="stat-sub" id="brierSub">calibration check</div>
+    </div>
+  </div>
+
+  <div class="grid" style="margin-top:18px;">
+    <div class="card col-4">
+      <div class="card-header">
+        <span class="card-title">Scale Level</span>
+        <span class="card-icon">&Delta;</span>
+      </div>
+      <div class="level-display">
+        <div class="level-badge" id="levelBadge">L--</div>
+        <div style="flex:1;">
+          <div style="display:flex; justify-content:space-between; font-size:0.78rem;">
+            <span class="text-dim" id="levelBetLabel">Bet size</span>
+            <span class="text-green" id="levelBet">--</span>
+          </div>
+          <div class="progress-bar">
+            <div class="progress-fill" id="levelProgress" style="width:0%"></div>
+          </div>
+          <div class="stat-sub" id="levelNextUnlock">Next level: --</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card col-4">
+      <div class="card-header">
+        <span class="card-title">Next Cycle</span>
+        <span class="card-icon">&circlearrowright;</span>
+      </div>
+      <div class="timer-display" id="cycleTimer">--:--</div>
+      <div class="timer-label" id="cycleLabel">awaiting bot status...</div>
+    </div>
+
+    <div class="card col-4">
+      <div class="card-header">
+        <span class="card-title">Recent Activity</span>
+        <span class="card-icon">&middot;</span>
+      </div>
+      <div>
+        <div class="flex flex-between" style="font-size:0.82rem;">
+          <span class="text-dim">Open trades</span>
+          <span class="text-green" id="openTrades">--</span>
+        </div>
+        <div class="flex flex-between" style="font-size:0.82rem; margin-top:6px;">
+          <span class="text-dim">Loss streak</span>
+          <span id="lossStreak">--</span>
+        </div>
+        <div class="streak-dots" id="streakDots"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid" style="margin-top:18px;">
+    <div class="card col-8">
+      <div class="card-header">
+        <span class="card-title">Cumulative P&L Curve</span>
+        <span class="card-icon">~</span>
+      </div>
+      <div class="spark-wrap">
+        <svg id="pnlSpark" viewBox="0 0 600 120" preserveAspectRatio="none"></svg>
+      </div>
+    </div>
+
+    <div class="card col-4">
+      <div class="card-header">
+        <span class="card-title">Per-Asset WR</span>
+        <span class="card-icon">&bull;</span>
+      </div>
+      <div class="bar-list" id="assetList">
+        <div class="text-dim">loading...</div>
+      </div>
+
+      <div class="card-section">
+        <div class="card-section-label">WR by Timeframe</div>
+        <div class="bar-list" id="timeframeList">
+          <div class="text-dim">loading...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid" style="margin-top:18px;">
+    <div class="card col-6">
+      <div class="card-header">
+        <span class="card-title">Top Signals (Learning)</span>
+        <span class="card-icon">&nabla;</span>
+      </div>
+      <table id="topSignals">
+        <thead>
+          <tr>
+            <th>Signal</th>
+            <th class="td-num">WR</th>
+            <th class="td-num">Samples</th>
+            <th class="td-num">Weight</th>
+          </tr>
+        </thead>
+        <tbody><tr><td colspan="4" class="text-dim">loading...</td></tr></tbody>
+      </table>
+    </div>
+
+    <div class="card col-6">
+      <div class="card-header">
+        <span class="card-title">Hourly Performance</span>
+        <span class="card-icon">h</span>
+      </div>
+      <div class="bar-list" id="hourlyList">
+        <div class="text-dim">loading...</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid" style="margin-top:18px;">
+    <div class="card col-12">
+      <div class="card-header collapsible" id="tradesToggle">
+        <span>
+          <span class="card-title">Recent Trades</span>
+          <span class="collapse-chevron" id="tradesChevron">&#9660;</span>
+        </span>
+        <span class="card-icon">&loz;</span>
+      </div>
+      <div class="card-body-collapsible" id="tradesBody">
+        <table id="tradesTable">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Asset</th>
+              <th>Dir</th>
+              <th class="td-num">Entry</th>
+              <th class="td-num">Size</th>
+              <th class="td-num">Conf</th>
+              <th>Status</th>
+              <th>Outcome</th>
+              <th class="td-num">PnL</th>
+            </tr>
+          </thead>
+          <tbody><tr><td colspan="9" class="text-dim">loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>
