@@ -97,6 +97,28 @@ class Supabase:
         self._raise_for_status(r)
         return r.json() if r.text else []
 
+    def delete(
+        self,
+        table: str,
+        filters: Dict[str, str],
+    ) -> int:
+        """DELETE rows matching PostgREST filters (e.g. {'user_id': 'eq.xyz'}).
+
+        Returns the number of rows affected (best-effort: Supabase returns the
+        deleted rows when Prefer: return=representation). Caller MUST pass
+        at least one filter — blank filters would wipe the table.
+        """
+        if not filters:
+            raise ValueError("delete requires at least one filter")
+        r = self._client.delete(
+            f"{self.base}/{table}",
+            params=filters,
+            headers={**self.headers, "Prefer": "return=representation"},
+        )
+        self._raise_for_status(r)
+        rows = r.json() if r.text else []
+        return len(rows) if isinstance(rows, list) else 0
+
     def update(
         self,
         table: str,

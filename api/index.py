@@ -449,6 +449,38 @@ async def bot_push(
         s.upsert("signal_performance", payload, on_conflict="user_id,asset,signal_name")
         return {"ok": True, "type": "signal", "count": len(payload)}
 
+    if kind == "reset":
+        # Wipe all user data (trades, signals, status). Idempotent.
+        # Scope: user_id only. No cross-user impact.
+        scope = data.get("scope") if isinstance(data, dict) else None
+        scopes = set(scope) if isinstance(scope, list) else {"trades", "signals", "status"}
+        deleted = {}
+        try:
+            if "trades" in scopes:
+                r = s.delete("trades", filters={"user_id": f"eq.{uid}"})
+                deleted["trades"] = r
+            if "signals" in scopes:
+                r = s.delete("signal_performance", filters={"user_id": f"eq.{uid}"})
+                deleted["signals"] = r
+            if "status" in scopes:
+                s.upsert(
+                    "bot_status",
+                    {
+                        "user_id": uid,
+                        "status": {
+                            "running": False, "dry_run": False,
+                            "net_pnl": 0, "today_pnl": 0,
+                            "scale_level": None, "last_update": None,
+                        },
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                    on_conflict="user_id",
+                )
+                deleted["status"] = "reset"
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"reset failed: {e}")
+        return {"ok": True, "type": "reset", "deleted": deleted}
+
     raise HTTPException(status_code=400, detail=f"Unknown type: {kind}")
 
 
