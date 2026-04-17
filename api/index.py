@@ -216,13 +216,22 @@ async def trades(
     polybot_session: Optional[str] = Cookie(None),
 ):
     sess = require_session(polybot_session)
-    rows = db().select(
-        "trades",
-        columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,timeframe",
-        filters={"user_id": f"eq.{sess['user_id']}"},
-        order="timestamp.desc",
-        limit=int(limit),
-    )
+    try:
+        rows = db().select(
+            "trades",
+            columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,timeframe",
+            filters={"user_id": f"eq.{sess['user_id']}"},
+            order="timestamp.desc",
+            limit=int(limit),
+        )
+    except Exception:
+        rows = db().select(
+            "trades",
+            columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at",
+            filters={"user_id": f"eq.{sess['user_id']}"},
+            order="timestamp.desc",
+            limit=int(limit),
+        )
     return rows
 
 
