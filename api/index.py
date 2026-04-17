@@ -216,22 +216,27 @@ async def trades(
     polybot_session: Optional[str] = Cookie(None),
 ):
     sess = require_session(polybot_session)
-    try:
-        rows = db().select(
-            "trades",
-            columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,timeframe",
-            filters={"user_id": f"eq.{sess['user_id']}"},
-            order="timestamp.desc",
-            limit=int(limit),
-        )
-    except Exception:
-        rows = db().select(
-            "trades",
-            columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at",
-            filters={"user_id": f"eq.{sess['user_id']}"},
-            order="timestamp.desc",
-            limit=int(limit),
-        )
+    rows = db().select(
+        "trades",
+        columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time",
+        filters={"user_id": f"eq.{sess['user_id']}"},
+        order="timestamp.desc",
+        limit=int(limit),
+    )
+    for r in rows:
+        tf = "5m"
+        if r.get("timestamp") and r.get("end_time"):
+            try:
+                t0 = datetime.fromisoformat(r["timestamp"].replace("Z", "+00:00"))
+                t1 = datetime.fromisoformat(r["end_time"].replace("Z", "+00:00"))
+                mins = (t1 - t0).total_seconds() / 60.0
+                if mins > 12:
+                    tf = "15m"
+                elif mins > 7:
+                    tf = "10m"
+            except Exception:
+                pass
+        r["timeframe"] = tf
     return rows
 
 
