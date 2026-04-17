@@ -45,13 +45,43 @@ setInterval(() => {
   $('localTime').textContent = new Date().toLocaleTimeString([], {
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
+  // Refresh "last update" counter each second
+  if (_lastStatusMs) {
+    const age = Math.max(0, Math.floor((Date.now() - _lastStatusMs) / 1000));
+    const el = $('lastUpdate');
+    const tag = $('lastUpdateTag');
+    if (!el) return;
+    if (age < 10) { el.textContent = `${age}s`; tag.classList.remove('stale'); tag.classList.add('fresh'); }
+    else if (age < 60) { el.textContent = `${age}s`; tag.classList.remove('fresh'); tag.classList.remove('stale'); }
+    else if (age < 600) { el.textContent = `${Math.floor(age/60)}m ${age%60}s`; tag.classList.remove('fresh'); tag.classList.add('stale'); }
+    else { el.textContent = `${Math.floor(age/60)}m`; tag.classList.remove('fresh'); tag.classList.add('stale'); }
+  }
 }, 1000);
+let _lastStatusMs = null;
 
 // ─── Summary Renderer ───
 async function loadSummary() {
   const s = await api('/api/summary');
 
-  // P&L
+  // Wallet balance (from bot status, pushed each cycle)
+  const walletBal = Number(s.status?.wallet_usdc || 0);
+  const walletEl = $('walletBal');
+  if (walletEl) {
+    walletEl.textContent = walletBal > 0 ? `$${walletBal.toFixed(2)}` : '$--';
+    walletEl.className = 'stat-big ' + (walletBal > 0 ? 'pos' : 'neutral');
+  }
+
+  // Unrealized P&L (on open positions, fetched from Polymarket live)
+  const unrealized = Number(s.status?.unrealized_pnl || 0);
+  const openValue = Number(s.status?.open_value_usd || 0);
+  const unrealEl = $('unrealizedPnl');
+  if (unrealEl) {
+    unrealEl.textContent = fmtUsd(unrealized);
+    unrealEl.className = 'stat-big ' + (unrealized > 0 ? 'pos' : unrealized < 0 ? 'neg' : 'neutral');
+    $('unrealizedSub').textContent = openValue > 0 ? `open value $${openValue.toFixed(2)}` : 'no open positions';
+  }
+
+  // P&L (realized)
   const today = Number(s.pnl?.today || 0);
   const net = Number(s.pnl?.net || 0);
   const todayEl = $('todayPnl');
@@ -71,12 +101,13 @@ async function loadSummary() {
   wrEl.className = 'stat-big ' + (wrOverall >= 0.55 ? 'pos' : wrOverall >= 0.48 ? 'neutral' : 'neg');
   $('winRateSub').textContent = `last 20: ${fmtPct(wrRecent)}`;
 
-  // Brier
+  // Brier (compact, in Activity card)
   const brier = Number(s.brier || 0.25);
   const brierEl = $('brier');
-  brierEl.textContent = brier.toFixed(3);
-  brierEl.className = 'stat-big ' + (brier < 0.22 ? 'pos' : brier < 0.27 ? 'neutral' : 'neg');
-  $('brierSub').textContent = brier < 0.25 ? 'better than random' : 'miscalibrated';
+  if (brierEl) {
+    brierEl.textContent = brier.toFixed(3);
+    brierEl.className = brier < 0.22 ? 'text-green' : brier < 0.27 ? 'text-amber' : 'text-red';
+  }
 
   // Streak & open
   $('openTrades').textContent = s.trades?.open ?? 0;
@@ -84,6 +115,12 @@ async function loadSummary() {
   const lsEl = $('lossStreak');
   lsEl.textContent = ls;
   lsEl.className = ls >= 3 ? 'text-red' : ls >= 2 ? 'text-amber' : 'text-green';
+
+  // Last-sync heartbeat: how old is the bot_status push?
+  const syncIso = s.status?.updated_at;
+  if (syncIso) {
+    try { _lastStatusMs = new Date(syncIso).getTime(); } catch { _lastStatusMs = null; }
+  }
 
   // Streak dots (last 10)
   const dotsWrap = $('streakDots');

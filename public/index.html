@@ -21,6 +21,7 @@
     </div>
   </div>
   <div class="topbar-right">
+    <div class="user-tag" id="lastUpdateTag" title="Seconds since last bot push">SYNC: <span id="lastUpdate">--</span></div>
     <div class="user-tag">USER: <span id="usernameTag">--</span></div>
     <div class="user-tag"><span id="localTime">--</span></div>
     <button class="logout-btn" id="logoutBtn">LOGOUT</button>
@@ -32,20 +33,29 @@
   <div class="grid">
     <div class="card col-3">
       <div class="card-header">
-        <span class="card-title">Today's P&L</span>
-        <span class="card-icon">$</span>
+        <span class="card-title">Wallet</span>
+        <span class="card-icon">&#9830;</span>
       </div>
-      <div class="stat-big pos" id="todayPnl">$0.00</div>
-      <div class="stat-sub" id="todayPnlSub">-- trades today</div>
+      <div class="stat-big" id="walletBal">$--</div>
+      <div class="stat-sub" id="walletSub">USDC.e on-chain</div>
     </div>
 
     <div class="card col-3">
       <div class="card-header">
-        <span class="card-title">Net P&L (All)</span>
+        <span class="card-title">Realized P&L</span>
         <span class="card-icon">&Sigma;</span>
       </div>
       <div class="stat-big" id="netPnl">$0.00</div>
       <div class="stat-sub" id="netPnlSub">--</div>
+    </div>
+
+    <div class="card col-3">
+      <div class="card-header">
+        <span class="card-title">Unrealized P&L</span>
+        <span class="card-icon">~</span>
+      </div>
+      <div class="stat-big" id="unrealizedPnl">$0.00</div>
+      <div class="stat-sub" id="unrealizedSub">on open positions</div>
     </div>
 
     <div class="card col-3">
@@ -56,19 +66,19 @@
       <div class="stat-big" id="winRate">--%</div>
       <div class="stat-sub" id="winRateSub">last 20: -- %</div>
     </div>
-
-    <div class="card col-3">
-      <div class="card-header">
-        <span class="card-title">Brier Score</span>
-        <span class="card-icon">&sigma;</span>
-      </div>
-      <div class="stat-big" id="brier">--</div>
-      <div class="stat-sub" id="brierSub">calibration check</div>
-    </div>
   </div>
 
   <div class="grid" style="margin-top:18px;">
-    <div class="card col-4">
+    <div class="card col-3">
+      <div class="card-header">
+        <span class="card-title">Today's P&L</span>
+        <span class="card-icon">$</span>
+      </div>
+      <div class="stat-big pos" id="todayPnl">$0.00</div>
+      <div class="stat-sub" id="todayPnlSub">-- trades today</div>
+    </div>
+
+    <div class="card col-3">
       <div class="card-header">
         <span class="card-title">Scale Level</span>
         <span class="card-icon">&Delta;</span>
@@ -88,7 +98,7 @@
       </div>
     </div>
 
-    <div class="card col-4">
+    <div class="card col-3">
       <div class="card-header">
         <span class="card-title">Next Cycle</span>
         <span class="card-icon">&circlearrowright;</span>
@@ -97,9 +107,9 @@
       <div class="timer-label" id="cycleLabel">awaiting bot status...</div>
     </div>
 
-    <div class="card col-4">
+    <div class="card col-3">
       <div class="card-header">
-        <span class="card-title">Recent Activity</span>
+        <span class="card-title">Activity</span>
         <span class="card-icon">&middot;</span>
       </div>
       <div>
@@ -110,6 +120,10 @@
         <div class="flex flex-between" style="font-size:0.82rem; margin-top:6px;">
           <span class="text-dim">Loss streak</span>
           <span id="lossStreak">--</span>
+        </div>
+        <div class="flex flex-between" style="font-size:0.82rem; margin-top:6px;">
+          <span class="text-dim">Brier</span>
+          <span id="brier">--</span>
         </div>
         <div class="streak-dots" id="streakDots"></div>
       </div>

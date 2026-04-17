@@ -258,6 +258,9 @@ a { color: var(--green); text-decoration: none; }
 .topbar-right { display: flex; align-items: center; gap: 14px; font-size: 0.78rem; }
 .user-tag { color: var(--text-dim); }
 .user-tag span { color: var(--green); }
+.user-tag.fresh span { color: var(--green-bright); text-shadow: 0 0 6px rgba(108,212,152,0.5); }
+.user-tag.stale span { color: var(--amber); }
+.user-tag.stale { border-color: rgba(212,170,60,0.25); }
 .logout-btn {
   background: transparent;
   border: 1px solid var(--border);
