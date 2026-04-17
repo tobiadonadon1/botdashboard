@@ -218,7 +218,7 @@ async def trades(
     sess = require_session(polybot_session)
     rows = db().select(
         "trades",
-        columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at",
+        columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,timeframe",
         filters={"user_id": f"eq.{sess['user_id']}"},
         order="timestamp.desc",
         limit=int(limit),
@@ -426,8 +426,14 @@ async def bot_push(
                 "pnl": r.get("pnl", 0),
                 "resolved_at": r.get("resolved_at"),
                 "end_time": r.get("end_time"),
+                "timeframe": r.get("timeframe", "5m"),
             })
-        s.upsert("trades", payload, on_conflict="user_id,trade_id")
+        try:
+            s.upsert("trades", payload, on_conflict="user_id,trade_id")
+        except Exception:
+            for p in payload:
+                p.pop("timeframe", None)
+            s.upsert("trades", payload, on_conflict="user_id,trade_id")
         return {"ok": True, "type": "trade", "count": len(payload)}
 
     if kind == "signal":

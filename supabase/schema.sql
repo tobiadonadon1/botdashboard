@@ -49,6 +49,7 @@ create table if not exists public.trades (
   pnl            numeric     default 0,
   resolved_at    timestamptz,
   end_time       timestamptz,
+  timeframe      text        default '5m',
   created_at     timestamptz not null default now(),
   unique (user_id, trade_id)
 );

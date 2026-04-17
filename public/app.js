@@ -306,7 +306,7 @@ async function loadTrades() {
   const data = await api('/api/trades?limit=25');
   const body = $('tradesTable').querySelector('tbody');
   if (!data.length) {
-    body.innerHTML = '<tr><td colspan="9" class="text-dim">no trades yet</td></tr>';
+    body.innerHTML = '<tr><td colspan="10" class="text-dim">no trades yet</td></tr>';
     return;
   }
   body.innerHTML = '';
@@ -318,10 +318,12 @@ async function loadTrades() {
     const dcls = dir === 'UP' ? 'badge-up' : 'badge-down';
     const pnl = Number(t.pnl || 0);
     const pnlCls = pnl > 0 ? 'outcome-win' : pnl < 0 ? 'outcome-loss' : 'text-dim';
+    const tf = t.timeframe || '5m';
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="text-dim">${fmtLocalTime(t.timestamp)}</td>
       <td>${t.asset || '--'}</td>
+      <td class="text-dim">${tf}</td>
       <td class="${dcls}">${dir}</td>
       <td class="td-num">$${Number(t.entry_price || 0).toFixed(3)}</td>
       <td class="td-num">$${Number(t.size_usd || 0).toFixed(2)}</td>
