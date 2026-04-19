@@ -625,119 +625,150 @@ tr:hover td { background: rgba(78, 148, 108, 0.03); }
 .ctrl-status.warn { color: var(--amber); }
 .ctrl-status.err  { color: var(--red); }
 
-/* ─── Polybot Avatar ─── */
+/* ─── Polybot Pixel Sprite ─── */
 .bot-stage {
   position: relative;
-  height: 240px;
-  margin: 8px 0 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  height: 130px;
+  margin: 6px 0 4px;
+  display: block;
   cursor: pointer;
   user-select: none;
   overflow: hidden;
-  border-radius: 8px;
+  border-radius: 4px;
   background:
-    radial-gradient(ellipse at center bottom, rgba(88, 181, 128, 0.10), transparent 60%),
-    repeating-linear-gradient(180deg, rgba(88, 181, 128, 0.025) 0 2px, transparent 2px 4px);
+    /* scanlines */
+    repeating-linear-gradient(0deg, rgba(88,181,128,0.05) 0 1px, transparent 1px 3px),
+    /* ground grid */
+    linear-gradient(180deg, #050d09 0%, #08160f 70%, #0a1e14 100%);
+  border: 1px solid rgba(88,181,128,0.18);
 }
-.bot-stage::after {
-  /* horizon line */
+.bot-stage::before {
+  /* floor line */
   content: '';
   position: absolute;
-  bottom: 18%;
-  left: 8%;
-  right: 8%;
+  left: 0; right: 0;
+  bottom: 22px;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(88, 181, 128, 0.30), transparent);
+  background: linear-gradient(90deg, transparent, rgba(88,181,128,0.45), transparent);
 }
+.bot-stage::after {
+  /* subtle CRT vignette */
+  content: '';
+  position: absolute; inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.45) 100%);
+}
+
 .bot-avatar {
-  position: relative;
-  height: 88%;
-  width: auto;
+  position: absolute;
+  bottom: 22px;
+  left: 0;
+  width: 56px;
+  height: 56px;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
   z-index: 2;
-  animation: botIdle 3.2s ease-in-out infinite;
-  transition: filter 0.2s ease;
-  filter: drop-shadow(0 4px 10px rgba(88, 181, 128, 0.25));
+  animation: botPatrol 9s steps(1, end) infinite;
+  filter: drop-shadow(0 0 6px rgba(88,181,128,0.35));
 }
-.bot-stage:hover .bot-avatar { filter: drop-shadow(0 4px 14px rgba(88, 181, 128, 0.45)); }
+.bot-stage:hover .bot-avatar { filter: drop-shadow(0 0 10px rgba(88,181,128,0.65)); }
 
-/* SVG parts */
-.bot-head      { fill: #1a3a2a; stroke: var(--green); stroke-width: 1.5; }
-.bot-visor     { fill: rgba(6, 22, 14, 0.85); stroke: rgba(88, 181, 128, 0.50); stroke-width: 1; }
-.bot-eye       { fill: var(--green-bright); animation: blink 4s ease-in-out infinite; }
-.bot-mouth     { fill: var(--green); }
-.bot-neck      { fill: #0d2218; }
-.bot-body      { fill: #17352a; stroke: var(--green); stroke-width: 1.5; }
-.bot-led       { fill: var(--green-bright); animation: ledPulse 1.8s ease-in-out infinite; }
-.bot-arm       { fill: #1a3a2a; stroke: var(--green-dim); stroke-width: 1.2; transform-origin: 50% 0%; }
-#armL          { transform-origin: 23px 78px; animation: armSwingL 3.2s ease-in-out infinite; }
-#armR          { transform-origin: 117px 78px; animation: armSwingR 3.2s ease-in-out infinite; }
-.bot-hand      { fill: var(--green); }
-.bot-leg       { fill: #1a3a2a; stroke: var(--green-dim); stroke-width: 1.2; }
-.bot-antenna   { stroke: var(--green); stroke-width: 2; }
-.bot-antenna-tip { fill: var(--green-bright); animation: ledPulse 1.4s ease-in-out infinite; }
-.bot-chest-text {
-  fill: var(--green-bright);
-  font-family: var(--mono);
-  font-size: 6px;
-  letter-spacing: 0.15em;
-  font-weight: 700;
-  opacity: 0.8;
+/* Pixel palette (monochrome green) */
+.bot-avatar .px       { fill: var(--green); }
+.bot-avatar .px-dim   { fill: var(--green-dim); }
+.bot-avatar .eye      { fill: #031409; }           /* eye = hole in head */
+.bot-avatar .eye.blink{ fill: var(--green); }
+.bot-avatar .mouth    { fill: var(--green-bright); animation: mouthPulse 1.3s steps(2, end) infinite; }
+.bot-avatar .led      { fill: var(--green-bright); animation: ledPulse 1.1s steps(2, end) infinite; }
+.bot-avatar .leg      { fill: var(--green); }
+
+/* Two-frame leg walk — alternates via steps() so it looks pixelated, not smooth */
+.bot-avatar .leg-l { animation: stepA 0.42s steps(2, end) infinite; }
+.bot-avatar .leg-r { animation: stepB 0.42s steps(2, end) infinite; }
+
+/* Blink — one frame per ~3s */
+.bot-avatar .eye { animation: blinkPx 3.1s steps(2, end) infinite; }
+
+/* Patrol: walk right, scan, turn, walk left, scan */
+@keyframes botPatrol {
+  0%   { left: 6%;  transform: scaleX(1); }
+  40%  { left: 78%; transform: scaleX(1); }
+  46%  { left: 78%; transform: scaleX(1); }    /* scanning */
+  50%  { left: 78%; transform: scaleX(-1); }   /* turn */
+  90%  { left: 6%;  transform: scaleX(-1); }
+  96%  { left: 6%;  transform: scaleX(-1); }   /* scanning */
+  100% { left: 6%;  transform: scaleX(1); }
 }
 
-@keyframes botIdle {
-  0%, 100% { transform: translateY(0)   rotate(-0.8deg); }
-  50%      { transform: translateY(-6px) rotate( 0.8deg); }
+@keyframes stepA {
+  0%   { transform: translateY(0); }
+  50%  { transform: translateY(-1px); }
+  100% { transform: translateY(0); }
 }
-@keyframes armSwingL {
-  0%, 100% { transform: rotate(-4deg); }
-  50%      { transform: rotate( 6deg); }
+@keyframes stepB {
+  0%   { transform: translateY(-1px); }
+  50%  { transform: translateY(0); }
+  100% { transform: translateY(-1px); }
 }
-@keyframes armSwingR {
-  0%, 100% { transform: rotate( 4deg); }
-  50%      { transform: rotate(-6deg); }
+@keyframes blinkPx {
+  0%, 96% { fill: #031409; }
+  98%     { fill: var(--green-bright); }       /* the blink frame is a flash */
 }
-@keyframes blink {
-  0%, 92%, 100% { transform: scaleY(1); }
-  94%, 98%      { transform: scaleY(0.12); }
-}
-.bot-eye { transform-box: fill-box; transform-origin: center; }
 @keyframes ledPulse {
-  0%, 100% { opacity: 1; }
-  50%      { opacity: 0.35; }
+  0%, 49%   { opacity: 1; }
+  50%, 100% { opacity: 0.35; }
+}
+@keyframes mouthPulse {
+  0%, 49%   { transform: scaleY(1);   transform-origin: center; }
+  50%, 100% { transform: scaleY(0.5); transform-origin: center; }
 }
 
-/* ─── Emote states (toggled via body class) ─── */
-.bot-avatar.happy  { animation: botCheer 0.6s ease-in-out 2; }
-.bot-avatar.sad    { animation: botSlump 1.2s ease-out    1; }
-.bot-avatar.angry  { animation: botShake 0.45s linear     3; }
+/* Scan sweep: a thin line that sweeps down when the bot "scans" (periodic) */
+.bot-scan {
+  position: absolute;
+  left: 0; right: 0; top: -2px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--green-bright), transparent);
+  opacity: 0;
+  z-index: 1;
+  pointer-events: none;
+  animation: scanSweep 9s ease-in-out infinite;
+}
+@keyframes scanSweep {
+  0%, 38%   { opacity: 0; top: -2px; }
+  42%       { opacity: 0.9; top: -2px; }
+  48%       { opacity: 0.9; top: 100%; }
+  49%, 88%  { opacity: 0; top: -2px; }
+  92%       { opacity: 0.9; top: -2px; }
+  98%       { opacity: 0.9; top: 100%; }
+  100%      { opacity: 0; }
+}
 
-@keyframes botCheer {
-  0%, 100% { transform: translateY(0)    rotate(0deg); }
-  25%      { transform: translateY(-22px) rotate(-6deg); }
-  50%      { transform: translateY(-8px)  rotate( 6deg); }
-  75%      { transform: translateY(-18px) rotate(-3deg); }
+/* ─── Emote states (temporarily override patrol) ─── */
+.bot-avatar.happy  { animation: botBounce 0.32s steps(2, end) 5; }
+.bot-avatar.sad    { animation: botSlump  1.2s  steps(2, end) forwards; }
+.bot-avatar.angry  { animation: botShake  0.14s steps(2, end) 7; }
+
+@keyframes botBounce {
+  0%, 49%   { transform: translateY(0); }
+  50%, 100% { transform: translateY(-6px); }
 }
 @keyframes botSlump {
-  0%   { transform: translateY(0)  rotate(0deg); }
-  50%  { transform: translateY(14px) rotate(-3deg); }
-  100% { transform: translateY(10px) rotate(-2deg); }
+  0%   { transform: translateY(0); }
+  100% { transform: translateY(4px); }
 }
 @keyframes botShake {
-  0%, 100% { transform: translate(0, 0)   rotate( 0deg); }
-  20%      { transform: translate(-4px, 0) rotate(-3deg); }
-  40%      { transform: translate( 4px, 0) rotate( 3deg); }
-  60%      { transform: translate(-3px, 0) rotate(-2deg); }
-  80%      { transform: translate( 3px, 0) rotate( 2deg); }
+  0%, 49%   { transform: translate(-2px, 0); }
+  50%, 100% { transform: translate( 2px, 0); }
 }
 
-.bot-avatar.angry .bot-eye   { fill: var(--red); }
-.bot-avatar.angry .bot-led   { fill: var(--red); }
-.bot-avatar.angry .bot-mouth { fill: var(--red); }
-.bot-avatar.sad   .bot-eye   { animation: none; transform: scaleY(0.4); }
-.bot-avatar.sad   .bot-mouth { fill: var(--amber); }
-.bot-avatar.happy .bot-eye   { fill: var(--green-bright); animation: blink 0.4s ease-in-out infinite; }
+.bot-avatar.angry .px,
+.bot-avatar.angry .leg    { fill: var(--red); }
+.bot-avatar.angry .led,
+.bot-avatar.angry .mouth  { fill: var(--red); animation: none; }
+.bot-avatar.sad   .mouth  { fill: var(--amber); animation: none; transform: scaleY(0.4); transform-origin: center; }
+.bot-avatar.sad   .eye    { animation: none; fill: #031409; }
+.bot-avatar.happy .mouth  { fill: var(--green-bright); animation: none; }
 
 /* ─── Arrows shot on WIN ─── */
 .bot-arrows {
@@ -747,20 +778,20 @@ tr:hover td { background: rgba(78, 148, 108, 0.03); }
 }
 .bot-arrow {
   position: absolute;
-  left: 50%; top: 58%;
-  width: 22px;
+  left: 50%; top: 60%;
+  width: 14px;
   height: 2px;
-  background: linear-gradient(90deg, var(--green-bright), transparent);
-  box-shadow: 0 0 6px var(--green-bright);
+  background: var(--green-bright);
+  box-shadow: 0 0 4px var(--green-bright);
   transform-origin: left center;
-  animation: arrowFly 0.85s cubic-bezier(.22,.61,.36,1) forwards;
+  animation: arrowFly 0.7s steps(6, end) forwards;
 }
 .bot-arrow::after {
-  content: '▸';
-  position: absolute; right: -4px; top: -9px;
-  color: var(--green-bright);
-  font-size: 14px;
-  text-shadow: 0 0 6px var(--green-bright);
+  content: '';
+  position: absolute; right: -2px; top: -1px;
+  width: 4px; height: 4px;
+  background: var(--green-bright);
+  box-shadow: 0 0 4px var(--green-bright);
 }
 @keyframes arrowFly {
   0%   { transform: translate(0, 0) rotate(var(--ang)) scaleX(0.2); opacity: 1; }
@@ -777,8 +808,8 @@ tr:hover td { background: rgba(78, 148, 108, 0.03); }
   left: 50%;
   top: 100%;
   transform: translate(-50%, 0);
-  width: 78px;
-  height: 90px;
+  width: 60px;
+  height: 68px;
   background: #1a2e22;
   border: 1px solid var(--green);
   border-radius: 4px;
@@ -853,16 +884,19 @@ tr:hover td { background: rgba(78, 148, 108, 0.03); }
 .bot-speech.bad  { background: #3a1418; border-color: var(--red); color: var(--red); }
 .bot-speech.bad::after  { background: #3a1418; border-color: var(--red); }
 
-/* ─── Bot stats strip ─── */
+/* ─── Bot stats strip (compact) ─── */
 .bot-stats {
   display: flex;
-  justify-content: space-around;
-  font-size: 0.72rem;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.68rem;
   color: var(--text-dim);
-  padding: 6px 0 0;
+  padding: 4px 0 0;
   border-top: 1px solid var(--border);
   margin-top: 4px;
   font-family: var(--mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 .bot-stats span span { color: var(--text); }
 

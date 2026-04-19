@@ -147,6 +147,15 @@ async def summary(polybot_session: Optional[str] = Cookie(None)):
     status_rows = s.select("bot_status", filters={"user_id": f"eq.{uid}"}, limit=1)
     status = status_rows[0]["status"] if status_rows else {"running": False}
 
+    # Current control command (dashboard → bot). Source of truth for button state.
+    control_state = "start"
+    try:
+        ctrl_rows = s.select("bot_control", filters={"user_id": f"eq.{uid}"}, limit=1)
+        if ctrl_rows:
+            control_state = str(ctrl_rows[0].get("command") or "start").lower()
+    except Exception:
+        pass  # table not yet migrated — fall back to 'start'
+
     # All resolved trades for the user (reasonable cap — dashboard doesn't need more)
     trades = s.select(
         "trades",
@@ -158,6 +167,7 @@ async def summary(polybot_session: Optional[str] = Cookie(None)):
 
     out: Dict = {
         "status": status,
+        "control_state": control_state,
         "pnl": {"today": 0.0, "net": 0.0},
         "win_rate": {"overall": 0.5, "recent20": 0.5, "recent50": 0.5},
         "trades": {"total": 0, "open": 0, "wins": 0, "losses": 0},
@@ -409,16 +419,23 @@ async def bot_control_set(
     cmd = str(body.get("command", "")).lower().strip()
     if cmd not in ("start", "pause"):
         raise HTTPException(status_code=400, detail="command must be 'start' or 'pause'")
-    db().upsert(
-        "bot_control",
-        {
-            "user_id": sess["user_id"],
-            "command": cmd,
-            "issued_at": datetime.now(timezone.utc).isoformat(),
-            "issued_by": sess.get("username") or "dashboard",
-        },
-        on_conflict="user_id",
-    )
+    try:
+        db().upsert(
+            "bot_control",
+            {
+                "user_id": sess["user_id"],
+                "command": cmd,
+                "issued_at": datetime.now(timezone.utc).isoformat(),
+                "issued_by": sess.get("username") or "dashboard",
+            },
+            on_conflict="user_id",
+        )
+    except Exception as e:
+        # Most common: migration not run yet → table doesn't exist.
+        raise HTTPException(
+            status_code=503,
+            detail=f"bot_control table missing? Run SQL migration. ({str(e)[:140]})",
+        )
     return {"ok": True, "command": cmd}
 
 

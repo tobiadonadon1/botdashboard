@@ -144,10 +144,12 @@ async function loadSummary() {
   if (banner) banner.style.display = isPaper ? 'block' : 'none';
   document.body.classList.toggle('paper', isPaper);
 
-  // Control state mirror (bot echoes it in its status push as control_state)
-  const ctrl = (s.status?.control_state || '').toLowerCase();
+  // Control state — prefer the dashboard-side truth (bot_control table) over
+  // the bot's self-reported echo, since the bot may take a cycle to catch up.
+  let ctrl = (s.control_state || '').toLowerCase();
+  if (!ctrl) ctrl = (s.status?.control_state || '').toLowerCase();
   if (ctrl === 'paused' || ctrl === 'pause') applyControlState('pause');
-  else if (ctrl === 'running' || ctrl === 'start') applyControlState('start');
+  else applyControlState('start');
 
   // Level + next cycle
   renderLevel(s.status || {});
@@ -329,7 +331,7 @@ function botClearState(delay) {
   if (bot.stateTimer) clearTimeout(bot.stateTimer);
   bot.stateTimer = setTimeout(() => {
     if (bot.avatar) bot.avatar.classList.remove('happy', 'sad', 'angry');
-    botSetMood('chilling', 'text-green');
+    botSetMood('patrolling', 'text-green');
   }, delay || 1600);
 }
 
@@ -414,7 +416,7 @@ function botReactToTrades(trades) {
 // ─── Control buttons (Start / Pause) ───
 async function sendControl(cmd) {
   const el = $('ctrlStatus');
-  if (el) { el.className = 'ctrl-status'; el.textContent = '…'; }
+  if (el) { el.className = 'ctrl-status'; el.textContent = 'sending…'; }
   try {
     const r = await fetch('/api/bot/control', {
       method: 'POST',
@@ -422,21 +424,30 @@ async function sendControl(cmd) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ command: cmd }),
     });
-    if (!r.ok) throw new Error(r.status);
+    if (!r.ok) {
+      let msg = 'FAILED';
+      try { const j = await r.json(); msg = (j.detail || '').slice(0, 60) || msg; } catch {}
+      throw new Error(msg);
+    }
     const j = await r.json();
-    if (el) { el.className = 'ctrl-status ok'; el.textContent = cmd === 'pause' ? 'PAUSED' : 'RUNNING'; }
     applyControlState(j.command || cmd);
     botSay(cmd === 'pause' ? 'taking a break.' : "let's go!", cmd === 'pause' ? 'warn' : '');
   } catch (e) {
-    if (el) { el.className = 'ctrl-status err'; el.textContent = 'FAILED'; }
+    if (el) { el.className = 'ctrl-status err'; el.textContent = String(e.message || 'FAILED'); }
   }
 }
 function applyControlState(cmd) {
   const sb = $('startBtn');
   const pb = $('pauseBtn');
+  const el = $('ctrlStatus');
   if (!sb || !pb) return;
-  sb.classList.toggle('active', cmd === 'start');
-  pb.classList.toggle('active', cmd === 'pause');
+  const paused = (cmd === 'pause');
+  sb.classList.toggle('active', !paused);
+  pb.classList.toggle('active', paused);
+  if (el) {
+    el.className = 'ctrl-status ' + (paused ? 'warn' : 'ok');
+    el.textContent = paused ? 'PAUSED' : 'RUNNING';
+  }
 }
 function bindControls() {
   const sb = $('startBtn');
