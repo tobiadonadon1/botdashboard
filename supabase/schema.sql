@@ -50,9 +50,13 @@ create table if not exists public.trades (
   resolved_at    timestamptz,
   end_time       timestamptz,
   timeframe      text        default '5m',
+  mode           text,        -- 'paper' | 'live' | null (legacy rows)
   created_at     timestamptz not null default now(),
   unique (user_id, trade_id)
 );
+
+-- If upgrading an existing table:
+--   alter table public.trades add column if not exists mode text;
 
 create index if not exists trades_user_ts_idx
   on public.trades (user_id, timestamp desc);

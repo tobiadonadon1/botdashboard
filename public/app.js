@@ -133,9 +133,16 @@ async function loadSummary() {
 
   // Status
   const isLive = !!s.status?.running;
+  const isPaper = s.status?.mode === 'paper';
   $('statusDot').className = 'status-dot' + (isLive ? '' : ' offline');
   $('statusText').textContent = isLive ? 'LIVE' : 'OFFLINE';
-  $('modeText').textContent = s.status?.dry_run ? 'DRY RUN' : 'LIVE TRADING';
+  $('modeText').textContent = isPaper ? 'PAPER MODE'
+                               : s.status?.dry_run ? 'DRY RUN' : 'LIVE TRADING';
+
+  // Banner: paper mode visibility
+  const banner = $('paperBanner');
+  if (banner) banner.style.display = isPaper ? 'block' : 'none';
+  document.body.classList.toggle('paper', isPaper);
 
   // Level + next cycle
   renderLevel(s.status || {});

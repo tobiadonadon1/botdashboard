@@ -565,3 +565,19 @@ tr:hover td { background: rgba(78, 148, 108, 0.03); }
   max-height: 0;
   opacity: 0;
 }
+
+/* ─── Paper Mode Banner ─── */
+.paper-banner {
+  background: linear-gradient(90deg, rgba(212, 170, 60, 0.22), rgba(212, 170, 60, 0.10));
+  border-top: 1px solid rgba(212, 170, 60, 0.55);
+  border-bottom: 1px solid rgba(212, 170, 60, 0.55);
+  color: var(--amber);
+  font-family: var(--mono);
+  font-weight: 600;
+  font-size: 0.82rem;
+  letter-spacing: 0.10em;
+  text-align: center;
+  padding: 8px 16px;
+  text-transform: uppercase;
+}
+body.paper .topbar { border-bottom-color: rgba(212, 170, 60, 0.35); }

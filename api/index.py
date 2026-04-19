@@ -216,13 +216,22 @@ async def trades(
     polybot_session: Optional[str] = Cookie(None),
 ):
     sess = require_session(polybot_session)
-    rows = db().select(
-        "trades",
-        columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time",
-        filters={"user_id": f"eq.{sess['user_id']}"},
-        order="timestamp.desc",
-        limit=int(limit),
-    )
+    try:
+        rows = db().select(
+            "trades",
+            columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode",
+            filters={"user_id": f"eq.{sess['user_id']}"},
+            order="timestamp.desc",
+            limit=int(limit),
+        )
+    except Exception:
+        rows = db().select(
+            "trades",
+            columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time",
+            filters={"user_id": f"eq.{sess['user_id']}"},
+            order="timestamp.desc",
+            limit=int(limit),
+        )
     for r in rows:
         tf = "5m"
         if r.get("timestamp") and r.get("end_time"):
@@ -441,13 +450,20 @@ async def bot_push(
                 "resolved_at": r.get("resolved_at"),
                 "end_time": r.get("end_time"),
                 "timeframe": r.get("timeframe", "5m"),
+                "mode": r.get("mode"),
             })
         try:
             s.upsert("trades", payload, on_conflict="user_id,trade_id")
         except Exception:
+            # Retry without optional cols if schema hasn't been migrated yet.
             for p in payload:
-                p.pop("timeframe", None)
-            s.upsert("trades", payload, on_conflict="user_id,trade_id")
+                p.pop("mode", None)
+            try:
+                s.upsert("trades", payload, on_conflict="user_id,trade_id")
+            except Exception:
+                for p in payload:
+                    p.pop("timeframe", None)
+                s.upsert("trades", payload, on_conflict="user_id,trade_id")
         return {"ok": True, "type": "trade", "count": len(payload)}
 
     if kind == "signal":
