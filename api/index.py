@@ -395,6 +395,43 @@ async def pnl_series(
 
 
 # ─────────────────────────────────────────────────────────
+# BOT CONTROL — dashboard → bot (pause/start)
+#   Dashboard: POST /api/bot/control  (cookie auth, body={"command":"pause"|"start"})
+#   Bot:        GET /api/bot/control  (bearer auth, returns current command)
+# ─────────────────────────────────────────────────────────
+@app.post("/api/bot/control")
+async def bot_control_set(
+    request: Request,
+    polybot_session: Optional[str] = Cookie(None),
+):
+    sess = require_session(polybot_session)
+    body = await request.json()
+    cmd = str(body.get("command", "")).lower().strip()
+    if cmd not in ("start", "pause"):
+        raise HTTPException(status_code=400, detail="command must be 'start' or 'pause'")
+    db().upsert(
+        "bot_control",
+        {
+            "user_id": sess["user_id"],
+            "command": cmd,
+            "issued_at": datetime.now(timezone.utc).isoformat(),
+            "issued_by": sess.get("username") or "dashboard",
+        },
+        on_conflict="user_id",
+    )
+    return {"ok": True, "command": cmd}
+
+
+@app.get("/api/bot/control")
+async def bot_control_get(authorization: Optional[str] = Header(None)):
+    user = require_bot_key(authorization)
+    rows = db().select("bot_control", filters={"user_id": f"eq.{user['id']}"}, limit=1)
+    if not rows:
+        return {"command": "start", "issued_at": None}
+    return {"command": rows[0].get("command") or "start", "issued_at": rows[0].get("issued_at")}
+
+
+# ─────────────────────────────────────────────────────────
 # BOT PUSH ENDPOINT
 #   Bot POSTs: {"type": "status"|"trade"|"signal", "data": {...}}
 #   Authenticates via Authorization: Bearer <bot_api_key>

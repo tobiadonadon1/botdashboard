@@ -81,6 +81,17 @@ create table if not exists public.signal_performance (
 );
 
 -- ─────────────────────────────────────────────────────────────────
+-- BOT CONTROL — dashboard → bot commands (pause/start)
+-- One row per user. Bot polls GET /api/bot/control every ~5s.
+-- ─────────────────────────────────────────────────────────────────
+create table if not exists public.bot_control (
+  user_id        uuid        primary key references public.users(id) on delete cascade,
+  command        text        not null default 'start',   -- 'start' | 'pause'
+  issued_at      timestamptz not null default now(),
+  issued_by      text
+);
+
+-- ─────────────────────────────────────────────────────────────────
 -- ROW-LEVEL SECURITY
 -- The dashboard uses the service_role key (bypasses RLS), but we
 -- still enable RLS so that anyone using the anon key can never read
@@ -90,6 +101,7 @@ alter table public.users              enable row level security;
 alter table public.bot_status         enable row level security;
 alter table public.trades             enable row level security;
 alter table public.signal_performance enable row level security;
+alter table public.bot_control        enable row level security;
 
 -- No policies defined → anon key sees nothing. The service_role key
 -- (used server-side only) bypasses RLS automatically.

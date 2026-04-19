@@ -566,6 +566,306 @@ tr:hover td { background: rgba(78, 148, 108, 0.03); }
   opacity: 0;
 }
 
+/* ─── Top-bar control buttons ─── */
+.ctrl-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+}
+.ctrl-btn {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 5px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: rgba(88, 181, 128, 0.08);
+  color: var(--green);
+  border: 1px solid rgba(88, 181, 128, 0.35);
+}
+.ctrl-btn:hover {
+  background: rgba(88, 181, 128, 0.20);
+  border-color: var(--green);
+  box-shadow: 0 0 10px rgba(88, 181, 128, 0.35);
+}
+.ctrl-btn:active { transform: translateY(1px); }
+.ctrl-btn.ctrl-pause {
+  color: var(--amber);
+  border-color: rgba(212, 170, 60, 0.45);
+  background: rgba(212, 170, 60, 0.08);
+}
+.ctrl-btn.ctrl-pause:hover {
+  background: rgba(212, 170, 60, 0.22);
+  border-color: var(--amber);
+  box-shadow: 0 0 10px rgba(212, 170, 60, 0.35);
+}
+.ctrl-btn.active {
+  background: rgba(88, 181, 128, 0.30);
+  box-shadow: 0 0 10px rgba(88, 181, 128, 0.50);
+}
+.ctrl-btn.ctrl-pause.active {
+  background: rgba(212, 170, 60, 0.30);
+  box-shadow: 0 0 10px rgba(212, 170, 60, 0.50);
+}
+.ctrl-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.ctrl-status {
+  font-size: 0.70rem;
+  color: var(--text-dim);
+  min-width: 70px;
+  font-family: var(--mono);
+}
+.ctrl-status.ok   { color: var(--green); }
+.ctrl-status.warn { color: var(--amber); }
+.ctrl-status.err  { color: var(--red); }
+
+/* ─── Polybot Avatar ─── */
+.bot-stage {
+  position: relative;
+  height: 240px;
+  margin: 8px 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  overflow: hidden;
+  border-radius: 8px;
+  background:
+    radial-gradient(ellipse at center bottom, rgba(88, 181, 128, 0.10), transparent 60%),
+    repeating-linear-gradient(180deg, rgba(88, 181, 128, 0.025) 0 2px, transparent 2px 4px);
+}
+.bot-stage::after {
+  /* horizon line */
+  content: '';
+  position: absolute;
+  bottom: 18%;
+  left: 8%;
+  right: 8%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(88, 181, 128, 0.30), transparent);
+}
+.bot-avatar {
+  position: relative;
+  height: 88%;
+  width: auto;
+  z-index: 2;
+  animation: botIdle 3.2s ease-in-out infinite;
+  transition: filter 0.2s ease;
+  filter: drop-shadow(0 4px 10px rgba(88, 181, 128, 0.25));
+}
+.bot-stage:hover .bot-avatar { filter: drop-shadow(0 4px 14px rgba(88, 181, 128, 0.45)); }
+
+/* SVG parts */
+.bot-head      { fill: #1a3a2a; stroke: var(--green); stroke-width: 1.5; }
+.bot-visor     { fill: rgba(6, 22, 14, 0.85); stroke: rgba(88, 181, 128, 0.50); stroke-width: 1; }
+.bot-eye       { fill: var(--green-bright); animation: blink 4s ease-in-out infinite; }
+.bot-mouth     { fill: var(--green); }
+.bot-neck      { fill: #0d2218; }
+.bot-body      { fill: #17352a; stroke: var(--green); stroke-width: 1.5; }
+.bot-led       { fill: var(--green-bright); animation: ledPulse 1.8s ease-in-out infinite; }
+.bot-arm       { fill: #1a3a2a; stroke: var(--green-dim); stroke-width: 1.2; transform-origin: 50% 0%; }
+#armL          { transform-origin: 23px 78px; animation: armSwingL 3.2s ease-in-out infinite; }
+#armR          { transform-origin: 117px 78px; animation: armSwingR 3.2s ease-in-out infinite; }
+.bot-hand      { fill: var(--green); }
+.bot-leg       { fill: #1a3a2a; stroke: var(--green-dim); stroke-width: 1.2; }
+.bot-antenna   { stroke: var(--green); stroke-width: 2; }
+.bot-antenna-tip { fill: var(--green-bright); animation: ledPulse 1.4s ease-in-out infinite; }
+.bot-chest-text {
+  fill: var(--green-bright);
+  font-family: var(--mono);
+  font-size: 6px;
+  letter-spacing: 0.15em;
+  font-weight: 700;
+  opacity: 0.8;
+}
+
+@keyframes botIdle {
+  0%, 100% { transform: translateY(0)   rotate(-0.8deg); }
+  50%      { transform: translateY(-6px) rotate( 0.8deg); }
+}
+@keyframes armSwingL {
+  0%, 100% { transform: rotate(-4deg); }
+  50%      { transform: rotate( 6deg); }
+}
+@keyframes armSwingR {
+  0%, 100% { transform: rotate( 4deg); }
+  50%      { transform: rotate(-6deg); }
+}
+@keyframes blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  94%, 98%      { transform: scaleY(0.12); }
+}
+.bot-eye { transform-box: fill-box; transform-origin: center; }
+@keyframes ledPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+/* ─── Emote states (toggled via body class) ─── */
+.bot-avatar.happy  { animation: botCheer 0.6s ease-in-out 2; }
+.bot-avatar.sad    { animation: botSlump 1.2s ease-out    1; }
+.bot-avatar.angry  { animation: botShake 0.45s linear     3; }
+
+@keyframes botCheer {
+  0%, 100% { transform: translateY(0)    rotate(0deg); }
+  25%      { transform: translateY(-22px) rotate(-6deg); }
+  50%      { transform: translateY(-8px)  rotate( 6deg); }
+  75%      { transform: translateY(-18px) rotate(-3deg); }
+}
+@keyframes botSlump {
+  0%   { transform: translateY(0)  rotate(0deg); }
+  50%  { transform: translateY(14px) rotate(-3deg); }
+  100% { transform: translateY(10px) rotate(-2deg); }
+}
+@keyframes botShake {
+  0%, 100% { transform: translate(0, 0)   rotate( 0deg); }
+  20%      { transform: translate(-4px, 0) rotate(-3deg); }
+  40%      { transform: translate( 4px, 0) rotate( 3deg); }
+  60%      { transform: translate(-3px, 0) rotate(-2deg); }
+  80%      { transform: translate( 3px, 0) rotate( 2deg); }
+}
+
+.bot-avatar.angry .bot-eye   { fill: var(--red); }
+.bot-avatar.angry .bot-led   { fill: var(--red); }
+.bot-avatar.angry .bot-mouth { fill: var(--red); }
+.bot-avatar.sad   .bot-eye   { animation: none; transform: scaleY(0.4); }
+.bot-avatar.sad   .bot-mouth { fill: var(--amber); }
+.bot-avatar.happy .bot-eye   { fill: var(--green-bright); animation: blink 0.4s ease-in-out infinite; }
+
+/* ─── Arrows shot on WIN ─── */
+.bot-arrows {
+  position: absolute; inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+.bot-arrow {
+  position: absolute;
+  left: 50%; top: 58%;
+  width: 22px;
+  height: 2px;
+  background: linear-gradient(90deg, var(--green-bright), transparent);
+  box-shadow: 0 0 6px var(--green-bright);
+  transform-origin: left center;
+  animation: arrowFly 0.85s cubic-bezier(.22,.61,.36,1) forwards;
+}
+.bot-arrow::after {
+  content: '▸';
+  position: absolute; right: -4px; top: -9px;
+  color: var(--green-bright);
+  font-size: 14px;
+  text-shadow: 0 0 6px var(--green-bright);
+}
+@keyframes arrowFly {
+  0%   { transform: translate(0, 0) rotate(var(--ang)) scaleX(0.2); opacity: 1; }
+  30%  { transform: translate(0, 0) rotate(var(--ang)) scaleX(1);   opacity: 1; }
+  100% {
+    transform: translate(var(--dx), var(--dy)) rotate(var(--ang)) scaleX(1);
+    opacity: 0;
+  }
+}
+
+/* ─── Notebook slide on LOSS ─── */
+.bot-notebook {
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  transform: translate(-50%, 0);
+  width: 78px;
+  height: 90px;
+  background: #1a2e22;
+  border: 1px solid var(--green);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.6), inset 0 0 0 3px rgba(6,22,14,0.8);
+  padding: 12px 10px;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 4;
+  transition: all 0.4s cubic-bezier(.22,.61,.36,1);
+}
+.bot-notebook::before {
+  content: 'POST-MORTEM';
+  position: absolute; top: 3px; left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.48rem;
+  letter-spacing: 0.12em;
+  color: var(--amber);
+  font-weight: 700;
+}
+.bot-notebook .nb-line {
+  height: 3px;
+  background: rgba(88, 181, 128, 0.40);
+  margin-top: 8px;
+  border-radius: 1px;
+}
+.bot-notebook .nb-line.short { width: 60%; }
+.bot-notebook.show {
+  opacity: 1;
+  top: 40%;
+  transform: translate(-50%, 0) rotate(-6deg);
+  animation: nbScribble 1.5s ease-in-out forwards;
+}
+@keyframes nbScribble {
+  0%   { top: 100%; transform: translate(-50%, 0) rotate(0deg); opacity: 0; }
+  30%  { top: 40%;  transform: translate(-50%, 0) rotate(-6deg); opacity: 1; }
+  100% { top: 40%;  transform: translate(-50%, 0) rotate(-6deg); opacity: 1; }
+}
+
+/* ─── Speech bubble ─── */
+.bot-speech {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  background: var(--green-deep);
+  color: var(--green-bright);
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--green);
+  font-size: 0.75rem;
+  font-family: var(--mono);
+  max-width: 140px;
+  opacity: 0;
+  transform: scale(0.6) translateY(10px);
+  transition: all 0.25s cubic-bezier(.22,.61,.36,1);
+  pointer-events: none;
+  z-index: 5;
+  white-space: nowrap;
+}
+.bot-speech::after {
+  content: '';
+  position: absolute;
+  left: 20px; bottom: -6px;
+  width: 10px; height: 10px;
+  background: var(--green-deep);
+  border-right: 1px solid var(--green);
+  border-bottom: 1px solid var(--green);
+  transform: rotate(45deg);
+}
+.bot-speech.show { opacity: 1; transform: scale(1) translateY(0); }
+.bot-speech.warn { background: #3a2d10; border-color: var(--amber); color: var(--amber); }
+.bot-speech.warn::after { background: #3a2d10; border-color: var(--amber); }
+.bot-speech.bad  { background: #3a1418; border-color: var(--red); color: var(--red); }
+.bot-speech.bad::after  { background: #3a1418; border-color: var(--red); }
+
+/* ─── Bot stats strip ─── */
+.bot-stats {
+  display: flex;
+  justify-content: space-around;
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  padding: 6px 0 0;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  font-family: var(--mono);
+}
+.bot-stats span span { color: var(--text); }
+
 /* ─── Paper Mode Banner ─── */
 .paper-banner {
   background: linear-gradient(90deg, rgba(212, 170, 60, 0.22), rgba(212, 170, 60, 0.10));

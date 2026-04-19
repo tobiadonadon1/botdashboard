@@ -144,6 +144,11 @@ async function loadSummary() {
   if (banner) banner.style.display = isPaper ? 'block' : 'none';
   document.body.classList.toggle('paper', isPaper);
 
+  // Control state mirror (bot echoes it in its status push as control_state)
+  const ctrl = (s.status?.control_state || '').toLowerCase();
+  if (ctrl === 'paused' || ctrl === 'pause') applyControlState('pause');
+  else if (ctrl === 'running' || ctrl === 'start') applyControlState('start');
+
   // Level + next cycle
   renderLevel(s.status || {});
   renderTimer(s.status || {});
@@ -285,10 +290,167 @@ function _utcHourToLocal(utcHour) {
   return d.getHours();
 }
 
-// ─── Top Signals ───
+// ─── Polybot Avatar (reactive to trade outcomes) ───
+const bot = {
+  stage: null, avatar: null, speech: null, arrows: null, notebook: null,
+  mood: null, winCount: 0, lossCount: 0,
+  lastResolvedId: null, firstLoad: true,
+  speechTimer: null, stateTimer: null, nbTimer: null,
+};
+
+function initBot() {
+  bot.stage    = $('botStage');
+  bot.avatar   = $('botAvatar');
+  bot.speech   = $('botSpeech');
+  bot.arrows   = $('botArrows');
+  bot.notebook = $('botNotebook');
+  bot.mood     = $('botMood');
+  if (!bot.stage) return;
+  bot.stage.addEventListener('click', () => botAngry());
+}
+
+function botSetMood(label, cls) {
+  if (!bot.mood) return;
+  bot.mood.textContent = label;
+  bot.mood.className = cls || 'text-green';
+}
+
+function botSay(text, variant) {
+  if (!bot.speech) return;
+  bot.speech.className = 'bot-speech show' + (variant ? ' ' + variant : '');
+  bot.speech.textContent = text;
+  if (bot.speechTimer) clearTimeout(bot.speechTimer);
+  bot.speechTimer = setTimeout(() => {
+    bot.speech.className = 'bot-speech';
+  }, 2600);
+}
+
+function botClearState(delay) {
+  if (bot.stateTimer) clearTimeout(bot.stateTimer);
+  bot.stateTimer = setTimeout(() => {
+    if (bot.avatar) bot.avatar.classList.remove('happy', 'sad', 'angry');
+    botSetMood('chilling', 'text-green');
+  }, delay || 1600);
+}
+
+function botWin() {
+  if (!bot.avatar) return;
+  bot.avatar.classList.remove('sad', 'angry');
+  bot.avatar.classList.add('happy');
+  botSetMood('celebrating', 'text-green');
+  botSay('CASHED IN!', '');
+  fireArrows(6);
+  bot.winCount++;
+  const el = $('botWinCount'); if (el) el.textContent = bot.winCount;
+  botClearState(1800);
+}
+
+function botLoss() {
+  if (!bot.avatar) return;
+  bot.avatar.classList.remove('happy', 'angry');
+  bot.avatar.classList.add('sad');
+  botSetMood('taking notes', 'text-amber');
+  botSay('NOTED.', 'warn');
+  showNotebook();
+  bot.lossCount++;
+  const el = $('botLossCount'); if (el) el.textContent = bot.lossCount;
+  botClearState(2200);
+}
+
+function botAngry() {
+  if (!bot.avatar) return;
+  bot.avatar.classList.remove('happy', 'sad');
+  bot.avatar.classList.add('angry');
+  const lines = ['HEY!', 'STOP POKING!', 'RUDE.', 'I AM WORKING.', 'LEAVE ME ALONE!'];
+  botSay(lines[Math.floor(Math.random() * lines.length)], 'bad');
+  botSetMood('annoyed', 'text-red');
+  botClearState(1400);
+}
+
+function fireArrows(n) {
+  if (!bot.arrows) return;
+  bot.arrows.innerHTML = '';
+  for (let i = 0; i < n; i++) {
+    const a = document.createElement('div');
+    a.className = 'bot-arrow';
+    const angle = -20 - Math.random() * 50;  // upward-ish
+    const dist  = 160 + Math.random() * 120;
+    const dx = Math.cos(angle * Math.PI / 180) * dist;
+    const dy = Math.sin(angle * Math.PI / 180) * dist;
+    a.style.setProperty('--ang', angle + 'deg');
+    a.style.setProperty('--dx',  dx.toFixed(0) + 'px');
+    a.style.setProperty('--dy',  dy.toFixed(0) + 'px');
+    a.style.animationDelay = (i * 0.07).toFixed(2) + 's';
+    bot.arrows.appendChild(a);
+  }
+  setTimeout(() => { if (bot.arrows) bot.arrows.innerHTML = ''; }, 1800);
+}
+
+function showNotebook() {
+  if (!bot.notebook) return;
+  bot.notebook.classList.add('show');
+  if (bot.nbTimer) clearTimeout(bot.nbTimer);
+  bot.nbTimer = setTimeout(() => {
+    if (bot.notebook) bot.notebook.classList.remove('show');
+  }, 2400);
+}
+
+// Called by loadTrades — triggers reactions on NEW resolved trades only.
+function botReactToTrades(trades) {
+  const latest = trades.find(t => t.outcome === 'WIN' || t.outcome === 'LOSS');
+  if (!latest) return;
+  const id = latest.trade_id;
+  if (bot.firstLoad) {
+    bot.lastResolvedId = id;
+    bot.firstLoad = false;
+    return;
+  }
+  if (id === bot.lastResolvedId) return;
+  bot.lastResolvedId = id;
+  if (latest.outcome === 'WIN') botWin();
+  else if (latest.outcome === 'LOSS') botLoss();
+}
+
+// ─── Control buttons (Start / Pause) ───
+async function sendControl(cmd) {
+  const el = $('ctrlStatus');
+  if (el) { el.className = 'ctrl-status'; el.textContent = '…'; }
+  try {
+    const r = await fetch('/api/bot/control', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: cmd }),
+    });
+    if (!r.ok) throw new Error(r.status);
+    const j = await r.json();
+    if (el) { el.className = 'ctrl-status ok'; el.textContent = cmd === 'pause' ? 'PAUSED' : 'RUNNING'; }
+    applyControlState(j.command || cmd);
+    botSay(cmd === 'pause' ? 'taking a break.' : "let's go!", cmd === 'pause' ? 'warn' : '');
+  } catch (e) {
+    if (el) { el.className = 'ctrl-status err'; el.textContent = 'FAILED'; }
+  }
+}
+function applyControlState(cmd) {
+  const sb = $('startBtn');
+  const pb = $('pauseBtn');
+  if (!sb || !pb) return;
+  sb.classList.toggle('active', cmd === 'start');
+  pb.classList.toggle('active', cmd === 'pause');
+}
+function bindControls() {
+  const sb = $('startBtn');
+  const pb = $('pauseBtn');
+  if (sb) sb.addEventListener('click', () => sendControl('start'));
+  if (pb) pb.addEventListener('click', () => sendControl('pause'));
+}
+
+// ─── Top Signals (legacy, kept for back-compat if #topSignals ever re-added) ───
 async function loadSignals() {
+  const tbl = $('topSignals');
+  if (!tbl) return;
   const data = await api('/api/signals');
-  const body = $('topSignals').querySelector('tbody');
+  const body = tbl.querySelector('tbody');
   if (!data.top.length) {
     body.innerHTML = '<tr><td colspan="4" class="text-dim">learning...</td></tr>';
     return;
@@ -317,6 +479,7 @@ async function loadTrades() {
     return;
   }
   body.innerHTML = '';
+  botReactToTrades(data);
   data.forEach(t => {
     const outcome = t.outcome || 'PENDING';
     const ocls = outcome === 'WIN' ? 'outcome-win'
@@ -411,6 +574,8 @@ $('tradesToggle').addEventListener('click', () => {
   chevron.classList.toggle('collapsed');
 });
 
+initBot();
+bindControls();
 loadMe().then(() => {
   refreshAll();
   setInterval(refreshAll, POLL_INTERVAL_MS);
