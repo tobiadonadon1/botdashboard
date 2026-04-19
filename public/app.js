@@ -134,6 +134,7 @@ async function loadSummary() {
   // Status
   const isLive = !!s.status?.running;
   const isPaper = s.status?.mode === 'paper';
+  window.__lastMode = isPaper ? 'paper' : 'live';
   $('statusDot').className = 'status-dot' + (isLive ? '' : ' offline');
   $('statusText').textContent = isLive ? 'LIVE' : 'OFFLINE';
   $('modeText').textContent = isPaper ? 'PAPER MODE'
@@ -297,7 +298,8 @@ const bot = {
   stage: null, avatar: null, speech: null, arrows: null, notebook: null,
   mood: null, winCount: 0, lossCount: 0,
   lastResolvedId: null, firstLoad: true,
-  speechTimer: null, stateTimer: null, nbTimer: null,
+  speechTimer: null, stateTimer: null, nbTimer: null, ambientTimer: null,
+  recentTrades: [],
 };
 
 function initBot() {
@@ -398,7 +400,9 @@ function showNotebook() {
 }
 
 // Called by loadTrades — triggers reactions on NEW resolved trades only.
+// Also records rolling sample for ambient chatter.
 function botReactToTrades(trades) {
+  bot.recentTrades = trades.slice(0, 20);
   const latest = trades.find(t => t.outcome === 'WIN' || t.outcome === 'LOSS');
   if (!latest) return;
   const id = latest.trade_id;
@@ -411,6 +415,82 @@ function botReactToTrades(trades) {
   bot.lastResolvedId = id;
   if (latest.outcome === 'WIN') botWin();
   else if (latest.outcome === 'LOSS') botLoss();
+}
+
+// ─── Ambient chatter (every ~10s) ───────────────────────────────
+const PHRASES = {
+  neutral: [
+    "Coffee first. Trades second.",
+    "Just vibing with the orderbook.",
+    "ETH is doing ETH things.",
+    "BTC, make up your mind.",
+    "Scanning 5m candles…",
+    "Waiting for that juicy edge.",
+    "Probing liquidity, boss.",
+    "Books look thin. Patient.",
+    "Nothing spicy yet.",
+    "Markets chill. I'm chill.",
+    "Eyes peeled. Fingers ready.",
+    "Running diagnostics. All green.",
+  ],
+  hot: [
+    "Damn, we're RAMPING up!",
+    "This streak is unreal.",
+    "Edge is printing money.",
+    "Big chad energy today.",
+    "Books are GIVING.",
+    "We're cooking, boss.",
+    "Catch me if you can.",
+    "Feels illegal to be this good.",
+  ],
+  cold: [
+    "Today's a slow one…",
+    "Market's being rude.",
+    "No edge, no trade.",
+    "Bored. Send signals.",
+    "Liquidity is shy today.",
+    "Patience mode: activated.",
+    "We'll get 'em next cycle.",
+  ],
+  paper: [
+    "Still on paper. Learning.",
+    "Building the brain…",
+    "n < 500. Grinding.",
+    "Gate's watching me.",
+    "Paper mode, big dreams.",
+    "Almost there. Keep the faith.",
+  ],
+};
+
+function pickPhraseBucket() {
+  const trades = bot.recentTrades || [];
+  const resolved = trades.filter(t => t.outcome === 'WIN' || t.outcome === 'LOSS');
+  if (resolved.length < 3) {
+    const mode = (window.__lastMode || 'paper').toLowerCase();
+    return mode === 'paper' ? 'paper' : 'neutral';
+  }
+  const recent = resolved.slice(0, 10);
+  const wins = recent.filter(t => t.outcome === 'WIN').length;
+  const rate = wins / recent.length;
+  const pnl  = recent.reduce((s, t) => s + (Number(t.pnl) || 0), 0);
+  if (rate >= 0.7 || pnl >= 25) return 'hot';
+  if (rate <= 0.35 || pnl <= -10) return 'cold';
+  return 'neutral';
+}
+
+function botAmbient() {
+  if (!bot.speech) return;
+  // Don't step on an event-driven line that's currently shown.
+  if (bot.speech.classList.contains('show')) return;
+  const bucket = pickPhraseBucket();
+  const pool = PHRASES[bucket] || PHRASES.neutral;
+  const phrase = pool[Math.floor(Math.random() * pool.length)];
+  bot.speech.className = 'bot-speech show';
+  bot.speech.textContent = phrase;
+  if (bot.ambientTimer) clearTimeout(bot.ambientTimer);
+  bot.ambientTimer = setTimeout(() => {
+    if (bot.speech) bot.speech.className = 'bot-speech';
+  }, 4500);
 }
 
 // ─── Control buttons (Start / Pause) ───
@@ -591,3 +671,7 @@ loadMe().then(() => {
   refreshAll();
   setInterval(refreshAll, POLL_INTERVAL_MS);
 });
+
+// Ambient chatter: first line after 3s, then every 10s.
+setTimeout(botAmbient, 3000);
+setInterval(botAmbient, 10000);

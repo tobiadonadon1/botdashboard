@@ -691,13 +691,31 @@ tr:hover td { background: rgba(78, 148, 108, 0.03); }
 .monitor-screen { fill: #021008;
                   filter: drop-shadow(0 0 4px rgba(88,181,128,0.45)); }
 .monitor-stand  { fill: var(--green-dim); }
-.monitor-content { animation: scrollCode 5s linear infinite; }
-.code-line      { fill: var(--green-bright); opacity: 0.85; }
-.code-line:nth-child(3n) { opacity: 0.5; }
-.code-line:nth-child(5n) { fill: var(--amber); opacity: 0.75; }
-@keyframes scrollCode {
-  0%   { transform: translateY(0); }
-  100% { transform: translateY(-30px); }
+.monitor-content { /* no transforms: lines stay inside the screen */ }
+.code-line {
+  fill: var(--green-bright);
+  opacity: 0;
+  animation: codeType 4.8s ease-in-out infinite;
+}
+.code-line.l1 { animation-delay: 0.0s;  }
+.code-line.l2 { animation-delay: 0.55s; }
+.code-line.l3 { animation-delay: 1.10s; }
+.code-line.l4 { animation-delay: 1.65s; fill: var(--amber); }
+.code-line.l5 { animation-delay: 2.20s; }
+.code-line.l6 { animation-delay: 2.75s; }
+@keyframes codeType {
+  0%   { opacity: 0;    }
+  18%  { opacity: 0.9;  }
+  78%  { opacity: 0.9;  }
+  100% { opacity: 0.15; }
+}
+.code-cursor {
+  fill: var(--green-bright);
+  animation: cursorBlink 0.9s steps(2) infinite;
+}
+@keyframes cursorBlink {
+  0%, 49%   { opacity: 1; }
+  50%, 100% { opacity: 0; }
 }
 
 /* ── Coffee machine ── */
@@ -916,13 +934,14 @@ tr:hover td { background: rgba(78, 148, 108, 0.03); }
   border: 1px solid var(--green);
   font-size: 0.75rem;
   font-family: var(--mono);
-  max-width: 140px;
+  max-width: 170px;
   opacity: 0;
   transform: scale(0.6) translateY(10px);
   transition: all 0.25s cubic-bezier(.22,.61,.36,1);
   pointer-events: none;
   z-index: 5;
-  white-space: nowrap;
+  white-space: normal;
+  line-height: 1.25;
 }
 .bot-speech::after {
   content: '';
