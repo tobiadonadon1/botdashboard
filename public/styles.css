@@ -625,11 +625,11 @@ tr:hover td { background: rgba(78, 148, 108, 0.03); }
 .ctrl-status.warn { color: var(--amber); }
 .ctrl-status.err  { color: var(--red); }
 
-/* ─── Polybot Pixel Sprite ─── */
+/* ─── Polybot // Workshop Scene ─── */
 .bot-stage {
   position: relative;
-  height: 130px;
-  margin: 6px 0 4px;
+  height: 260px;
+  margin: 8px 0 4px;
   display: block;
   cursor: pointer;
   user-select: none;
@@ -637,138 +637,194 @@ tr:hover td { background: rgba(78, 148, 108, 0.03); }
   border-radius: 4px;
   background:
     /* scanlines */
-    repeating-linear-gradient(0deg, rgba(88,181,128,0.05) 0 1px, transparent 1px 3px),
-    /* ground grid */
-    linear-gradient(180deg, #050d09 0%, #08160f 70%, #0a1e14 100%);
-  border: 1px solid rgba(88,181,128,0.18);
-}
-.bot-stage::before {
-  /* floor line */
-  content: '';
-  position: absolute;
-  left: 0; right: 0;
-  bottom: 22px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(88,181,128,0.45), transparent);
+    repeating-linear-gradient(0deg, rgba(88,181,128,0.04) 0 1px, transparent 1px 3px),
+    /* ambient gradient */
+    radial-gradient(ellipse at 60% 40%, rgba(88,181,128,0.10), transparent 60%),
+    linear-gradient(180deg, #040c08 0%, #08160f 60%, #0a1f15 100%);
+  border: 1px solid rgba(88,181,128,0.22);
 }
 .bot-stage::after {
-  /* subtle CRT vignette */
-  content: '';
+  /* CRT vignette */
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%);
+}
+
+.scene {
   position: absolute; inset: 0;
-  pointer-events: none;
-  background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.45) 100%);
+  width: 100%; height: 100%;
+  z-index: 1;
 }
 
-.bot-avatar {
-  position: absolute;
-  bottom: 22px;
-  left: 0;
-  width: 56px;
-  height: 56px;
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
-  z-index: 2;
-  animation: botPatrol 9s steps(1, end) infinite;
-  filter: drop-shadow(0 0 6px rgba(88,181,128,0.35));
-}
-.bot-stage:hover .bot-avatar { filter: drop-shadow(0 0 10px rgba(88,181,128,0.65)); }
+/* ── Wall grid ── */
+.wall-grid line { stroke: var(--green-dim); stroke-width: 0.25; opacity: 0.35; }
 
-/* Pixel palette (monochrome green) */
-.bot-avatar .px       { fill: var(--green); }
-.bot-avatar .px-dim   { fill: var(--green-dim); }
-.bot-avatar .eye      { fill: #031409; }           /* eye = hole in head */
-.bot-avatar .eye.blink{ fill: var(--green); }
-.bot-avatar .mouth    { fill: var(--green-bright); animation: mouthPulse 1.3s steps(2, end) infinite; }
-.bot-avatar .led      { fill: var(--green-bright); animation: ledPulse 1.1s steps(2, end) infinite; }
-.bot-avatar .leg      { fill: var(--green); }
+/* ── Poster ── */
+.poster-frame { fill: none; stroke: var(--green-dim); stroke-width: 0.5; opacity: 0.7; }
+.poster-chart { stroke: var(--green-bright); stroke-width: 0.8; opacity: 0.85;
+                filter: drop-shadow(0 0 1px var(--green-bright)); }
+.poster-label { fill: var(--green); opacity: 0.7; }
+.poster-dot   { fill: var(--green-bright); animation: ledPulse 1.6s steps(2) infinite; }
 
-/* Two-frame leg walk — alternates via steps() so it looks pixelated, not smooth */
-.bot-avatar .leg-l { animation: stepA 0.42s steps(2, end) infinite; }
-.bot-avatar .leg-r { animation: stepB 0.42s steps(2, end) infinite; }
+/* ── Plant ── */
+.plant-pot   { fill: var(--green-dim); opacity: 0.8; }
+.plant-soil  { fill: #1a2a20; }
+.plant-leaf  { fill: var(--green); opacity: 0.85; }
+.plant-leaf:nth-of-type(2n) { fill: var(--green-bright); opacity: 0.7; }
 
-/* Blink — one frame per ~3s */
-.bot-avatar .eye { animation: blinkPx 3.1s steps(2, end) infinite; }
+/* ── Floor ── */
+.floor { stroke: var(--green); stroke-width: 0.6; opacity: 0.55; }
 
-/* Patrol: walk right, scan, turn, walk left, scan */
-@keyframes botPatrol {
-  0%   { left: 6%;  transform: scaleX(1); }
-  40%  { left: 78%; transform: scaleX(1); }
-  46%  { left: 78%; transform: scaleX(1); }    /* scanning */
-  50%  { left: 78%; transform: scaleX(-1); }   /* turn */
-  90%  { left: 6%;  transform: scaleX(-1); }
-  96%  { left: 6%;  transform: scaleX(-1); }   /* scanning */
-  100% { left: 6%;  transform: scaleX(1); }
+/* ── Desk / chair / keyboard ── */
+.desk-top   { fill: var(--green); opacity: 0.75; }
+.desk-leg   { fill: var(--green-dim); opacity: 0.7; }
+.chair      { fill: var(--green-dim); opacity: 0.55; }
+.chair-leg  { fill: var(--green-dim); opacity: 0.45; }
+.keyboard   { fill: var(--green-bright); opacity: 0.7;
+              animation: kbdFlash 0.35s steps(2) infinite; }
+@keyframes kbdFlash {
+  0%, 49%   { opacity: 0.70; }
+  50%, 100% { opacity: 0.95; }
 }
 
-@keyframes stepA {
+/* ── Monitor ── */
+.monitor-frame  { fill: var(--green-dim); opacity: 0.9; }
+.monitor-screen { fill: #021008;
+                  filter: drop-shadow(0 0 4px rgba(88,181,128,0.45)); }
+.monitor-stand  { fill: var(--green-dim); }
+.monitor-content { animation: scrollCode 5s linear infinite; }
+.code-line      { fill: var(--green-bright); opacity: 0.85; }
+.code-line:nth-child(3n) { opacity: 0.5; }
+.code-line:nth-child(5n) { fill: var(--amber); opacity: 0.75; }
+@keyframes scrollCode {
   0%   { transform: translateY(0); }
-  50%  { transform: translateY(-1px); }
-  100% { transform: translateY(0); }
+  100% { transform: translateY(-30px); }
 }
-@keyframes stepB {
-  0%   { transform: translateY(-1px); }
-  50%  { transform: translateY(0); }
-  100% { transform: translateY(-1px); }
+
+/* ── Coffee machine ── */
+.coffee-body { fill: var(--green-dim); opacity: 0.85; }
+.coffee-slot { fill: #021008; }
+.coffee-top  { fill: var(--green); opacity: 0.7; }
+.coffee-led  { fill: var(--red); animation: ledPulse 1.1s steps(2) infinite; }
+.coffee-led.led-b { fill: var(--green-bright); animation-delay: 0.55s; }
+.steam {
+  fill: var(--green-bright);
+  opacity: 0;
+  animation: steam 2.4s ease-out infinite;
 }
+.steam.s1 { animation-delay: 0s;   }
+.steam.s2 { animation-delay: 0.8s; }
+.steam.s3 { animation-delay: 1.6s; }
+@keyframes steam {
+  0%   { opacity: 0;    transform: translateY(0);  }
+  25%  { opacity: 0.7;  }
+  100% { opacity: 0;    transform: translateY(-6px); }
+}
+
+/* ── Bot sprite ──
+   Two nested groups:
+   · #botPos  runs the long ROUTINE (sit → walk → coffee → walk back → sit)
+   · #botAvatar runs EMOTES (happy/sad/angry) — JS toggles classes here
+*/
+.bot-pos {
+  animation: botRoutine 42s ease-in-out infinite;
+}
+.bot-pose {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.bot-pose .px       { fill: var(--green); }
+.bot-pose .px-dim   { fill: var(--green-dim); }
+.bot-pose .eye      { fill: #021008; animation: blinkPx 3.3s steps(2) infinite; }
+.bot-pose .mouth    { fill: var(--green-bright); }
+.bot-pose .led      { fill: var(--green-bright); animation: ledPulse 1.1s steps(2) infinite; }
+.bot-pose .leg      { fill: var(--green); }
+.bot-pose .arm      { fill: var(--green); }
+.bot-pose .antenna-tip { fill: var(--green-bright); animation: ledPulse 1.4s steps(2) infinite; }
+.bot-pose .cup      { fill: var(--amber); opacity: 0; animation: cupShow 42s linear infinite; }
+.bot-pose .cup-steam{ fill: var(--green-bright); opacity: 0;
+                      animation: cupSteam 42s linear infinite; }
+
+/* Typing arms — subtle alternating y while AT DESK (paused during walk) */
+.bot-pose .arm-l { animation: typeL 0.35s steps(2) infinite; }
+.bot-pose .arm-r { animation: typeR 0.35s steps(2) infinite; }
+@keyframes typeL {
+  0%, 49%   { transform: translateY(0); }
+  50%, 100% { transform: translateY(-0.5px); }
+}
+@keyframes typeR {
+  0%, 49%   { transform: translateY(-0.5px); }
+  50%, 100% { transform: translateY(0); }
+}
+.bot-pose .arm-l, .bot-pose .arm-r {
+  transform-origin: top center;
+}
+
 @keyframes blinkPx {
-  0%, 96% { fill: #031409; }
-  98%     { fill: var(--green-bright); }       /* the blink frame is a flash */
+  0%, 96%   { fill: #021008; }
+  97%, 99%  { fill: var(--green); }
+  100%      { fill: #021008; }
 }
 @keyframes ledPulse {
   0%, 49%   { opacity: 1; }
   50%, 100% { opacity: 0.35; }
 }
-@keyframes mouthPulse {
-  0%, 49%   { transform: scaleY(1);   transform-origin: center; }
-  50%, 100% { transform: scaleY(0.5); transform-origin: center; }
+
+/* ROUTINE:
+     0-55%  at desk (sitting pose behind keyboard)
+     55-60% walk from desk to coffee machine
+     60-73% stand at coffee machine (drinking, cup visible)
+     73-78% walk back to desk
+     78-100% sitting again
+*/
+@keyframes botRoutine {
+  0%,   55% { transform: translate(128px, 70px); }  /* at desk, right of monitor */
+  60%       { transform: translate(172px, 66px); }  /* arrived at coffee */
+  72%       { transform: translate(172px, 66px); }  /* drinking */
+  77%       { transform: translate(128px, 70px); }  /* back at desk */
+  100%      { transform: translate(128px, 70px); }
 }
 
-/* Scan sweep: a thin line that sweeps down when the bot "scans" (periodic) */
-.bot-scan {
-  position: absolute;
-  left: 0; right: 0; top: -2px;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--green-bright), transparent);
-  opacity: 0;
-  z-index: 1;
-  pointer-events: none;
-  animation: scanSweep 9s ease-in-out infinite;
+/* Cup appears only during coffee segment */
+@keyframes cupShow {
+  0%, 60%   { opacity: 0; }
+  62%, 71%  { opacity: 1; }
+  73%, 100% { opacity: 0; }
 }
-@keyframes scanSweep {
-  0%, 38%   { opacity: 0; top: -2px; }
-  42%       { opacity: 0.9; top: -2px; }
-  48%       { opacity: 0.9; top: 100%; }
-  49%, 88%  { opacity: 0; top: -2px; }
-  92%       { opacity: 0.9; top: -2px; }
-  98%       { opacity: 0.9; top: 100%; }
-  100%      { opacity: 0; }
+@keyframes cupSteam {
+  0%, 60%   { opacity: 0; transform: translateY(0); }
+  62%       { opacity: 0.7; transform: translateY(0); }
+  70%       { opacity: 0; transform: translateY(-3px); }
+  73%, 100% { opacity: 0; }
 }
 
-/* ─── Emote states (temporarily override patrol) ─── */
-.bot-avatar.happy  { animation: botBounce 0.32s steps(2, end) 5; }
-.bot-avatar.sad    { animation: botSlump  1.2s  steps(2, end) forwards; }
-.bot-avatar.angry  { animation: botShake  0.14s steps(2, end) 7; }
+/* ── Emote states ── */
+.bot-pose.happy  { animation: botBounce 0.30s steps(2) 5; }
+.bot-pose.sad    { animation: botSlump  1.0s  steps(2) forwards; }
+.bot-pose.angry  { animation: botShake  0.12s steps(2) 8; }
 
 @keyframes botBounce {
   0%, 49%   { transform: translateY(0); }
-  50%, 100% { transform: translateY(-6px); }
+  50%, 100% { transform: translateY(-4px); }
 }
 @keyframes botSlump {
   0%   { transform: translateY(0); }
-  100% { transform: translateY(4px); }
+  100% { transform: translateY(3px); }
 }
 @keyframes botShake {
-  0%, 49%   { transform: translate(-2px, 0); }
-  50%, 100% { transform: translate( 2px, 0); }
+  0%, 49%   { transform: translate(-1.5px, 0); }
+  50%, 100% { transform: translate( 1.5px, 0); }
 }
 
-.bot-avatar.angry .px,
-.bot-avatar.angry .leg    { fill: var(--red); }
-.bot-avatar.angry .led,
-.bot-avatar.angry .mouth  { fill: var(--red); animation: none; }
-.bot-avatar.sad   .mouth  { fill: var(--amber); animation: none; transform: scaleY(0.4); transform-origin: center; }
-.bot-avatar.sad   .eye    { animation: none; fill: #031409; }
-.bot-avatar.happy .mouth  { fill: var(--green-bright); animation: none; }
+.bot-pose.angry .px,
+.bot-pose.angry .leg,
+.bot-pose.angry .arm  { fill: var(--red); }
+.bot-pose.angry .led,
+.bot-pose.angry .mouth{ fill: var(--red); animation: none; }
+.bot-pose.angry .antenna-tip { fill: var(--red); }
+.bot-pose.sad   .mouth { fill: var(--amber); }
+.bot-pose.sad   .eye   { animation: none; fill: #021008; }
+.bot-pose.happy .mouth { fill: var(--green-bright); }
+.bot-pose.happy .eye   { animation: none; fill: var(--green-bright); }
 
 /* ─── Arrows shot on WIN ─── */
 .bot-arrows {
