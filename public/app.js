@@ -63,12 +63,24 @@ let _lastStatusMs = null;
 async function loadSummary() {
   const s = await api('/api/summary');
 
-  // Wallet balance (from bot status, pushed each cycle)
+  // Wallet balance (from bot status, pushed each cycle).
+  // Sticky: once we've seen a real value, never revert to '$--' on a stale
+  // or partial response — the on-chain USDC balance doesn't teleport to 0.
   const walletBal = Number(s.status?.wallet_usdc || 0);
+  if (walletBal > 0) window.__lastWallet = walletBal;
+  const displayWallet = walletBal > 0 ? walletBal : (window.__lastWallet || 0);
+  const realizedToday = Number(s.pnl?.today || 0);
   const walletEl = $('walletBal');
-  if (walletEl) {
-    walletEl.textContent = walletBal > 0 ? `$${walletBal.toFixed(2)}` : '$--';
-    walletEl.className = 'stat-big ' + (walletBal > 0 ? 'pos' : 'neutral');
+  if (walletEl && displayWallet > 0) {
+    walletEl.textContent = `$${displayWallet.toFixed(2)}`;
+    walletEl.className = 'stat-big ' + (realizedToday >= 0 ? 'pos' : 'neutral');
+  }
+  const walletSub = $('walletSub');
+  if (walletSub) {
+    const tag = realizedToday === 0
+      ? 'USDC.e on-chain'
+      : `USDC.e on-chain · ${realizedToday > 0 ? '+' : ''}$${realizedToday.toFixed(2)} today`;
+    walletSub.textContent = tag;
   }
 
   // Unrealized P&L (on open positions, fetched from Polymarket live)
@@ -139,26 +151,13 @@ async function loadSummary() {
   const STALE_AFTER = 420; // 7 min > one 5-min cycle + buffer
   const fresh = ageSec !== null && ageSec < STALE_AFTER;
   const isLive = running && fresh;
-  // Paper mode is only shown when we have FRESH affirmative evidence.
-  // Stale status rows from old paper runs must never flash the banner on
-  // hard-refresh — default to hidden until proven otherwise.
-  const isPaper = fresh && s.status?.mode === 'paper';
-  window.__lastMode = isPaper ? 'paper' : 'live';
-  try {
-    localStorage.setItem('lastMode', window.__lastMode);
-    document.documentElement.dataset.mode = window.__lastMode;
-  } catch (_) {}
+  // Paper banner removed — bot is live, full stop. If we ever return to
+  // paper runs, re-introduce it explicitly.
   $('statusDot').className = 'status-dot' + (isLive ? '' : ' offline');
   if (!running) $('statusText').textContent = 'OFFLINE';
   else if (!fresh) $('statusText').textContent = 'STALE';
   else $('statusText').textContent = 'LIVE';
-  $('modeText').textContent = isPaper ? 'PAPER MODE'
-                               : s.status?.dry_run ? 'DRY RUN' : 'LIVE TRADING';
-
-  // Banner: paper mode visibility (only on fresh paper confirmation)
-  const banner = $('paperBanner');
-  if (banner) banner.style.display = isPaper ? 'block' : 'none';
-  document.body.classList.toggle('paper', isPaper);
+  $('modeText').textContent = 'LIVE TRADING';
 
   // Control state — prefer the dashboard-side truth (bot_control table) over
   // the bot's self-reported echo, since the bot may take a cycle to catch up.
