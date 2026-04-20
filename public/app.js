@@ -141,6 +141,10 @@ async function loadSummary() {
   const isLive = running && fresh;
   const isPaper = s.status?.mode === 'paper';
   window.__lastMode = isPaper ? 'paper' : 'live';
+  try {
+    localStorage.setItem('lastMode', window.__lastMode);
+    document.documentElement.dataset.mode = window.__lastMode;
+  } catch (_) {}
   $('statusDot').className = 'status-dot' + (isLive ? '' : ' offline');
   if (!running) $('statusText').textContent = 'OFFLINE';
   else if (!fresh) $('statusText').textContent = 'STALE';

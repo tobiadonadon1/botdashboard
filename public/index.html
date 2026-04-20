@@ -6,6 +6,17 @@
 <title>POLYBOT // COMMAND CENTER</title>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/styles.css">
+<script>
+  // Remember last known mode across refresh so the PAPER banner doesn't
+  // flash on hard-reload before the first /api/summary response arrives.
+  try {
+    var _lm = localStorage.getItem('lastMode');
+    if (_lm === 'live') document.documentElement.dataset.mode = 'live';
+  } catch (_) {}
+</script>
+<style>
+  html[data-mode="live"] #paperBanner { display: none !important; }
+</style>
 </head>
 <body>
 
