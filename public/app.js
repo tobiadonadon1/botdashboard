@@ -131,12 +131,20 @@ async function loadSummary() {
     dotsWrap.appendChild(d);
   });
 
-  // Status
-  const isLive = !!s.status?.running;
+  // Status — a bot is "LIVE" only if it self-reports running AND its heartbeat
+  // is fresh. Killed bots leave running=true in the DB (no graceful shutdown),
+  // so without a staleness gate we'd falsely report them alive forever.
+  const running = !!s.status?.running;
+  const ageSec = _lastStatusMs ? Math.floor((Date.now() - _lastStatusMs) / 1000) : null;
+  const STALE_AFTER = 420; // 7 min > one 5-min cycle + buffer
+  const fresh = ageSec !== null && ageSec < STALE_AFTER;
+  const isLive = running && fresh;
   const isPaper = s.status?.mode === 'paper';
   window.__lastMode = isPaper ? 'paper' : 'live';
   $('statusDot').className = 'status-dot' + (isLive ? '' : ' offline');
-  $('statusText').textContent = isLive ? 'LIVE' : 'OFFLINE';
+  if (!running) $('statusText').textContent = 'OFFLINE';
+  else if (!fresh) $('statusText').textContent = 'STALE';
+  else $('statusText').textContent = 'LIVE';
   $('modeText').textContent = isPaper ? 'PAPER MODE'
                                : s.status?.dry_run ? 'DRY RUN' : 'LIVE TRADING';
 
