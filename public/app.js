@@ -172,6 +172,55 @@ async function loadSummary() {
 
   // Live Polymarket positions (pushed on bot heartbeat)
   renderPositions(s.status || {});
+
+  // Shadow-mode metrics strip (hidden unless bot is in shadow mode)
+  renderShadow(s.status || {});
+  if ((s.status || {}).shadow_mode) {
+    $('modeText').textContent = 'SHADOW MODE';
+  }
+}
+
+// ─── Shadow-mode metrics + pass-gate badge ───
+function renderShadow(status) {
+  const section = $('shadowSection');
+  if (!section) return;
+  const enabled = !!status.shadow_mode || !!(status.shadow && status.shadow.enabled);
+  section.style.display = enabled ? '' : 'none';
+  if (!enabled) return;
+
+  const sh = status.shadow || {};
+  const n  = Number(sh.n || 0);
+  const wr = Number(sh.wr || 0);
+  const pf = Number(sh.profit_factor || 0);
+  const ev = Number(sh.ev_per_trade || 0);
+  const net = Number(sh.net_pnl || 0);
+
+  $('shadowN').textContent = n;
+  $('shadowWR').textContent = n ? fmtPct(wr) : '--';
+  $('shadowPF').textContent = n ? pf.toFixed(2) : '--';
+  $('shadowEV').textContent = n ? (ev >= 0 ? '+' : '') + fmtUsd(ev) : '--';
+  $('shadowNet').textContent = n ? (net >= 0 ? '+' : '') + fmtUsd(net) : '--';
+
+  // Pass-gate badge: n≥10, PF≥1.5, EV≥0.30. Mirrors the bot-side target.
+  const gateN  = n >= 10;
+  const gatePF = pf >= 1.5;
+  const gateEV = ev >= 0.30;
+  const badge = $('shadowGateBadge');
+  if (!badge) return;
+  if (!n) {
+    badge.textContent = 'waiting for first shadow trade…';
+    badge.style.color = 'var(--text-dim, #888)';
+  } else if (gateN && gatePF && gateEV) {
+    badge.textContent = '✓ PASS — ready to go live';
+    badge.style.color = '#4ee08c';
+  } else {
+    const parts = [];
+    parts.push((gateN  ? '✓' : '…') + ` n≥10 (${n})`);
+    parts.push((gatePF ? '✓' : '…') + ` PF≥1.5 (${pf.toFixed(2)})`);
+    parts.push((gateEV ? '✓' : '…') + ` EV≥$0.30 (${ev.toFixed(2)})`);
+    badge.textContent = parts.join('   ');
+    badge.style.color = 'var(--text-dim, #c0c0c0)';
+  }
 }
 
 // ─── Live Polymarket Positions (from bot heartbeat) ───
@@ -683,6 +732,43 @@ async function loadTrades() {
   });
 }
 
+// ─── Shadow Trades (live paper; real book + real outcomes) ───
+async function loadShadowTrades() {
+  const section = $('shadowSection');
+  if (!section || section.style.display === 'none') return;
+  const data = await api('/api/trades?limit=25&shadow=1');
+  const body = $('shadowTradesTable').querySelector('tbody');
+  if (!data.length) {
+    body.innerHTML = '<tr><td colspan="10" class="text-dim">no shadow trades yet — bot will start posting once signals qualify</td></tr>';
+    return;
+  }
+  body.innerHTML = '';
+  data.forEach(t => {
+    const outcome = t.outcome || 'PENDING';
+    const ocls = outcome === 'WIN' ? 'outcome-win'
+      : outcome === 'LOSS' ? 'outcome-loss' : 'outcome-pending';
+    const dir = t.direction || '--';
+    const dcls = dir === 'UP' ? 'badge-up' : 'badge-down';
+    const pnl = Number(t.pnl || 0);
+    const pnlCls = pnl > 0 ? 'outcome-win' : pnl < 0 ? 'outcome-loss' : 'text-dim';
+    const tf = t.timeframe || '5m';
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="text-dim">${fmtLocalTime(t.timestamp)}</td>
+      <td>${t.asset || '--'}</td>
+      <td class="text-dim">${tf}</td>
+      <td class="${dcls}">${dir}</td>
+      <td class="td-num">$${Number(t.entry_price || 0).toFixed(3)}</td>
+      <td class="td-num">$${Number(t.size_usd || 0).toFixed(2)}</td>
+      <td class="td-num text-dim">${Math.round((t.confidence || 0) * 100)}%</td>
+      <td class="text-dim">${t.status || '--'}</td>
+      <td class="${ocls}">${outcome}</td>
+      <td class="td-num ${pnlCls}">${fmtUsd(pnl)}</td>
+    `;
+    body.appendChild(tr);
+  });
+}
+
 // ─── Cumulative P&L sparkline ───
 async function loadPnlChart() {
   const data = await api('/api/pnl_series?limit=200');
@@ -729,13 +815,16 @@ async function loadPnlChart() {
 // ─── Refresh loop ───
 async function refreshAll() {
   try {
+    // loadSummary sets shadow pane visibility; shadow trades fetch
+    // keys off that visibility, so run summary first then fan out.
+    await loadSummary();
     await Promise.all([
-      loadSummary(),
       loadAssets(),
       loadTimeframes(),
       loadHourly(),
       loadSignals(),
       loadTrades(),
+      loadShadowTrades(),
       loadPnlChart(),
     ]);
   } catch (e) {

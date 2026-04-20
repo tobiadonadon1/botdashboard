@@ -50,13 +50,16 @@ create table if not exists public.trades (
   resolved_at    timestamptz,
   end_time       timestamptz,
   timeframe      text        default '5m',
-  mode           text,        -- 'paper' | 'live' | null (legacy rows)
+  mode           text,        -- 'paper' | 'live' | 'shadow' | null (legacy rows)
+  shadow         boolean     default false,  -- true = shadow-mode journal row, never real $
   created_at     timestamptz not null default now(),
   unique (user_id, trade_id)
 );
 
 -- If upgrading an existing table:
 --   alter table public.trades add column if not exists mode text;
+--   alter table public.trades add column if not exists shadow boolean default false;
+--   create index if not exists trades_user_shadow_idx on public.trades (user_id, shadow);
 
 create index if not exists trades_user_ts_idx
   on public.trades (user_id, timestamp desc);
@@ -64,6 +67,8 @@ create index if not exists trades_user_outcome_idx
   on public.trades (user_id, outcome);
 create index if not exists trades_user_asset_idx
   on public.trades (user_id, asset);
+create index if not exists trades_user_shadow_idx
+  on public.trades (user_id, shadow);
 
 -- ─────────────────────────────────────────────────────────────────
 -- SIGNAL PERFORMANCE — per-user learning state

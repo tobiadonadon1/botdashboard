@@ -388,6 +388,44 @@
     </div>
   </div>
 
+  <!-- ── Shadow Mode pane (hidden when shadow_mode=false) ─────────── -->
+  <div class="grid" id="shadowSection" style="margin-top:18px; display:none;">
+    <div class="card col-12">
+      <div class="card-header">
+        <span>
+          <span class="card-title">Shadow Mode — live paper-trading against real book + real outcomes</span>
+        </span>
+        <span class="card-icon" id="shadowGateBadge" style="font-size:13px;">--</span>
+      </div>
+      <div style="display:flex; flex-wrap:wrap; gap:18px; padding:12px 16px 6px 16px;">
+        <div><div class="stat-sub">TRADES</div><div class="stat-big" id="shadowN">--</div></div>
+        <div><div class="stat-sub">WIN RATE</div><div class="stat-big" id="shadowWR">--</div></div>
+        <div><div class="stat-sub">PROFIT FACTOR</div><div class="stat-big" id="shadowPF">--</div></div>
+        <div><div class="stat-sub">EV / TRADE</div><div class="stat-big" id="shadowEV">--</div></div>
+        <div><div class="stat-sub">NET P&L</div><div class="stat-big" id="shadowNet">--</div></div>
+      </div>
+      <div class="card-body-collapsible">
+        <table id="shadowTradesTable">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Asset</th>
+              <th>TF</th>
+              <th>Dir</th>
+              <th class="td-num">Entry</th>
+              <th class="td-num">Size</th>
+              <th class="td-num">Conf</th>
+              <th>Status</th>
+              <th>Outcome</th>
+              <th class="td-num">PnL</th>
+            </tr>
+          </thead>
+          <tbody><tr><td colspan="10" class="text-dim">loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <script src="/app.js"></script>

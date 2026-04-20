@@ -248,25 +248,50 @@ async def summary(response: Response, polybot_session: Optional[str] = Cookie(No
 @app.get("/api/trades")
 async def trades(
     limit: int = 25,
+    shadow: Optional[str] = None,
     polybot_session: Optional[str] = Cookie(None),
 ):
+    """
+    Trade list.
+      • shadow=1 | true  → only shadow-mode rows
+      • shadow=0 | false → only live rows (shadow is NULL or false)
+      • omit            → all rows (backwards-compatible)
+    """
     sess = require_session(polybot_session)
+    filters = {"user_id": f"eq.{sess['user_id']}"}
+    if shadow is not None:
+        want = str(shadow).strip().lower() in ("1", "true", "yes")
+        # Supabase/PostgREST filter. For the "live only" case include
+        # legacy rows where shadow IS NULL, so pre-migration data stays
+        # visible in the live tab.
+        filters["shadow"] = "is.true" if want else "not.is.true"
     try:
         rows = db().select(
             "trades",
-            columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode",
-            filters={"user_id": f"eq.{sess['user_id']}"},
+            columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode,shadow",
+            filters=filters,
             order="timestamp.desc",
             limit=int(limit),
         )
     except Exception:
-        rows = db().select(
-            "trades",
-            columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time",
-            filters={"user_id": f"eq.{sess['user_id']}"},
-            order="timestamp.desc",
-            limit=int(limit),
-        )
+        # Fallback 1: no shadow column yet
+        filters.pop("shadow", None)
+        try:
+            rows = db().select(
+                "trades",
+                columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode",
+                filters=filters,
+                order="timestamp.desc",
+                limit=int(limit),
+            )
+        except Exception:
+            rows = db().select(
+                "trades",
+                columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time",
+                filters=filters,
+                order="timestamp.desc",
+                limit=int(limit),
+            )
     for r in rows:
         tf = "5m"
         if r.get("timestamp") and r.get("end_time"):
@@ -530,19 +555,25 @@ async def bot_push(
                 "end_time": r.get("end_time"),
                 "timeframe": r.get("timeframe", "5m"),
                 "mode": r.get("mode"),
+                "shadow": bool(r.get("shadow", False)),
             })
         try:
             s.upsert("trades", payload, on_conflict="user_id,trade_id")
         except Exception:
             # Retry without optional cols if schema hasn't been migrated yet.
             for p in payload:
-                p.pop("mode", None)
+                p.pop("shadow", None)
             try:
                 s.upsert("trades", payload, on_conflict="user_id,trade_id")
             except Exception:
                 for p in payload:
-                    p.pop("timeframe", None)
-                s.upsert("trades", payload, on_conflict="user_id,trade_id")
+                    p.pop("mode", None)
+                try:
+                    s.upsert("trades", payload, on_conflict="user_id,trade_id")
+                except Exception:
+                    for p in payload:
+                        p.pop("timeframe", None)
+                    s.upsert("trades", payload, on_conflict="user_id,trade_id")
         return {"ok": True, "type": "trade", "count": len(payload)}
 
     if kind == "signal":
