@@ -136,6 +136,51 @@
   </div>
 
   <div class="grid" style="margin-top:18px;">
+    <div class="card col-12">
+      <div class="card-header">
+        <span class="card-title">Live Polymarket Positions</span>
+        <span class="card-icon">&diams;</span>
+      </div>
+      <div class="flex" style="gap:20px; flex-wrap:wrap; margin-bottom:10px;">
+        <div style="flex:1; min-width:130px;">
+          <div class="stat-sub">Positions</div>
+          <div class="stat-big" id="posCount">--</div>
+          <div class="stat-sub" id="posStatusBreakdown">--</div>
+        </div>
+        <div style="flex:1; min-width:140px;">
+          <div class="stat-sub">Spent (cost)</div>
+          <div class="stat-big" id="posCost">$--</div>
+          <div class="stat-sub">avg entry</div>
+        </div>
+        <div style="flex:1; min-width:140px;">
+          <div class="stat-sub">Current value</div>
+          <div class="stat-big" id="posCurVal">$--</div>
+          <div class="stat-sub">on-chain</div>
+        </div>
+        <div style="flex:1; min-width:140px;">
+          <div class="stat-sub">Unrealized P&amp;L</div>
+          <div class="stat-big" id="posUnreal">$--</div>
+          <div class="stat-sub">vs entry</div>
+        </div>
+      </div>
+      <table id="positionsTable">
+        <thead>
+          <tr>
+            <th>Market</th>
+            <th>Side</th>
+            <th class="td-num">Shares</th>
+            <th class="td-num">Avg</th>
+            <th class="td-num">Value</th>
+            <th class="td-num">P&amp;L</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody><tr><td colspan="7" class="text-dim">loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="grid" style="margin-top:18px;">
     <div class="card col-8">
       <div class="card-header">
         <span class="card-title">Cumulative P&L Curve</span>

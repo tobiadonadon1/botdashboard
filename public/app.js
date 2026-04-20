@@ -169,6 +169,78 @@ async function loadSummary() {
   // Level + next cycle
   renderLevel(s.status || {});
   renderTimer(s.status || {});
+
+  // Live Polymarket positions (pushed on bot heartbeat)
+  renderPositions(s.status || {});
+}
+
+// ─── Live Polymarket Positions (from bot heartbeat) ───
+function renderPositions(status) {
+  const positions = Array.isArray(status.positions) ? status.positions : [];
+  const body = $('positionsTable')?.querySelector('tbody');
+  if (!body || !$('posCount')) return;
+
+  if (!positions.length) {
+    body.innerHTML = '<tr><td colspan="7" class="text-dim">no positions</td></tr>';
+    $('posCount').textContent = '0';
+    $('posStatusBreakdown').textContent = 'no positions';
+    $('posCost').textContent = '$--';
+    $('posCurVal').textContent = '$--';
+    $('posUnreal').textContent = '$--';
+    $('posUnreal').className = 'stat-big';
+    return;
+  }
+
+  let totalCost = 0, totalCur = 0;
+  const statusCounts = { LIVE: 0, WIN: 0, LOSS: 0, SETTLED: 0 };
+
+  body.innerHTML = '';
+  positions.forEach(p => {
+    const shares = Number(p.size || 0);
+    const avg = Number(p.avgPrice || 0);
+    const cv = Number(p.currentValue || 0);
+    const pnl = Number(p.pnl || 0);
+    const cost = shares * avg;
+    totalCost += cost;
+    totalCur += cv;
+
+    const stat = p.status || 'LIVE';
+    statusCounts[stat] = (statusCounts[stat] || 0) + 1;
+
+    const statCls = stat === 'WIN' ? 'outcome-win'
+      : stat === 'LOSS' ? 'outcome-loss'
+      : stat === 'LIVE' ? 'text-amber'
+      : 'text-dim';
+    const pnlCls = pnl > 0 ? 'outcome-win' : pnl < 0 ? 'outcome-loss' : 'text-dim';
+    const dir = String(p.outcome || '').toUpperCase();
+    const dcls = dir === 'UP' ? 'badge-up' : 'badge-down';
+    const rawTitle = p.title || p.slug || '--';
+    const shortTitle = rawTitle.replace(
+      /^(Bitcoin|Ethereum|Solana|Dogecoin|XRP|Avalanche|Chainlink)\s+Up or Down\s+/i, ''
+    ).slice(0, 52);
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${shortTitle}</td>
+      <td class="${dcls}">${dir || '--'}</td>
+      <td class="td-num">${shares.toFixed(2)}</td>
+      <td class="td-num">$${avg.toFixed(3)}</td>
+      <td class="td-num">$${cv.toFixed(2)}</td>
+      <td class="td-num ${pnlCls}">${fmtUsd(pnl)}</td>
+      <td class="${statCls}">${stat}</td>
+    `;
+    body.appendChild(tr);
+  });
+
+  const totalPnl = totalCur - totalCost;
+  $('posCount').textContent = String(positions.length);
+  $('posStatusBreakdown').textContent =
+    `${statusCounts.LIVE} live · ${statusCounts.WIN} win · ${statusCounts.LOSS} loss`;
+  $('posCost').textContent = `$${totalCost.toFixed(2)}`;
+  $('posCurVal').textContent = `$${totalCur.toFixed(2)}`;
+  const unrealEl = $('posUnreal');
+  unrealEl.textContent = fmtUsd(totalPnl);
+  unrealEl.className = 'stat-big ' + (totalPnl > 0 ? 'pos' : totalPnl < 0 ? 'neg' : 'neutral');
 }
 
 // ─── Level ───
