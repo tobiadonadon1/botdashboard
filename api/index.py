@@ -24,6 +24,11 @@ import os
 import sys
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
+from zoneinfo import ZoneInfo
+
+# User's local tz — drives "today" windowing for P&L and daily stop displays.
+# Override via env var if the user moves.
+USER_TZ = ZoneInfo(os.getenv("USER_TZ", "America/Chicago"))
 
 from fastapi import Cookie, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -180,8 +185,25 @@ async def summary(polybot_session: Optional[str] = Cookie(None)):
     if not trades:
         return out
 
-    today_key = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    today_pnl = sum(float(t["pnl"] or 0) for t in trades if (t["timestamp"] or "").startswith(today_key))
+    # "Today" window = from local-midnight (user's tz) to now, converted to UTC
+    # so we can compare against trade.timestamp (ISO UTC from Supabase).
+    now_local = datetime.now(USER_TZ)
+    local_midnight = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_start_utc = local_midnight.astimezone(timezone.utc)
+
+    def _parse_ts(s: str) -> Optional[datetime]:
+        if not s:
+            return None
+        try:
+            return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except Exception:
+            return None
+
+    today_pnl = 0.0
+    for t in trades:
+        pt = _parse_ts(t.get("timestamp") or "")
+        if pt and pt >= day_start_utc:
+            today_pnl += float(t["pnl"] or 0)
     net_pnl = sum(float(t["pnl"] or 0) for t in trades)
     out["pnl"] = {"today": today_pnl, "net": net_pnl}
 
