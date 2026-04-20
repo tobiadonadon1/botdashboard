@@ -143,7 +143,10 @@ async def me(polybot_session: Optional[str] = Cookie(None)):
 # DATA ENDPOINTS — all scoped to sess['user_id']
 # ─────────────────────────────────────────────────────────
 @app.get("/api/summary")
-async def summary(polybot_session: Optional[str] = Cookie(None)):
+async def summary(response: Response, polybot_session: Optional[str] = Cookie(None)):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
     sess = require_session(polybot_session)
     uid = sess["user_id"]
     s = db()
