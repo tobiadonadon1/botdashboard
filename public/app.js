@@ -139,7 +139,10 @@ async function loadSummary() {
   const STALE_AFTER = 420; // 7 min > one 5-min cycle + buffer
   const fresh = ageSec !== null && ageSec < STALE_AFTER;
   const isLive = running && fresh;
-  const isPaper = s.status?.mode === 'paper';
+  // Paper mode is only shown when we have FRESH affirmative evidence.
+  // Stale status rows from old paper runs must never flash the banner on
+  // hard-refresh — default to hidden until proven otherwise.
+  const isPaper = fresh && s.status?.mode === 'paper';
   window.__lastMode = isPaper ? 'paper' : 'live';
   try {
     localStorage.setItem('lastMode', window.__lastMode);
@@ -152,7 +155,7 @@ async function loadSummary() {
   $('modeText').textContent = isPaper ? 'PAPER MODE'
                                : s.status?.dry_run ? 'DRY RUN' : 'LIVE TRADING';
 
-  // Banner: paper mode visibility
+  // Banner: paper mode visibility (only on fresh paper confirmation)
   const banner = $('paperBanner');
   if (banner) banner.style.display = isPaper ? 'block' : 'none';
   document.body.classList.toggle('paper', isPaper);
