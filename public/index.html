@@ -7,35 +7,50 @@
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
+<body class="mode-monitor range-today">
 
 <div class="topbar">
   <div class="topbar-left">
+    <button class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Menu">&#9776;</button>
     <div class="topbar-logo">POLYBOT</div>
     <div class="status-pill">
       <span class="status-dot" id="statusDot"></span>
       <span id="statusText">--</span>
     </div>
-    <div class="status-pill">
+    <div class="status-pill hide-mobile">
       <span id="modeText">--</span>
     </div>
-    <div class="ctrl-group">
+    <div class="mode-toggle" role="group" aria-label="Control mode">
+      <button class="mode-btn" data-mode="monitor" id="modeMonitorBtn" title="Read-only (default)">MONITOR</button>
+      <button class="mode-btn" data-mode="pilot" id="modePilotBtn" title="Core controls unlocked">PILOT</button>
+      <button class="mode-btn" data-mode="expert" id="modeExpertBtn" title="Everything unlocked + debug">EXPERT</button>
+    </div>
+    <div class="ctrl-group pilot-only hide-mobile">
       <button class="ctrl-btn ctrl-start" id="startBtn" title="Resume the bot">▶ START</button>
       <button class="ctrl-btn ctrl-pause" id="pauseBtn" title="Pause the bot (no new trades)">❚❚ PAUSE</button>
       <span class="ctrl-status" id="ctrlStatus"></span>
     </div>
   </div>
   <div class="topbar-right">
-    <div class="user-tag" id="lastUpdateTag" title="Seconds since last bot push">SYNC: <span id="lastUpdate">--</span></div>
-    <div class="user-tag">USER: <span id="usernameTag">--</span></div>
-    <div class="user-tag"><span id="localTime">--</span></div>
-    <button class="logout-btn" id="logoutBtn">LOGOUT</button>
+    <select class="range-sel" id="timeRangeSel" title="Time range for P&L/WR panels">
+      <option value="today">Today</option>
+      <option value="24h">Last 24h</option>
+      <option value="7d">Last 7d</option>
+      <option value="run">This run</option>
+      <option value="all">All time</option>
+    </select>
+    <button class="refresh-btn" id="refreshBtn" title="Force refresh">&#x21bb;</button>
+    <div class="user-tag hide-mobile" id="lastUpdateTag" title="Seconds since last bot push">SYNC: <span id="lastUpdate">--</span></div>
+    <div class="user-tag hide-mobile">USER: <span id="usernameTag">--</span></div>
+    <div class="user-tag clock-tag" id="localTimeTag" title="local · UTC"><span id="localTime">--</span></div>
+    <button class="logout-btn hide-mobile" id="logoutBtn">LOGOUT</button>
   </div>
 </div>
 
-<!-- Bot-state banner: OFFLINE / STALE / RUNNING / HALTED. Always present,
-     hidden when bot is healthy. Top of page so nothing obscures it on mobile. -->
+<!-- Bot-state banner: OFFLINE / STALE / HALTED. Hidden when healthy.
+     Sticky at top so it's visible on every scroll position. -->
 <div class="state-banner" id="stateBanner" style="display:none;"></div>
+
 <!-- Emergency-stop confirmation modal -->
 <div class="estop-modal" id="estopModal" style="display:none;">
   <div class="estop-box">
@@ -54,9 +69,83 @@
   </div>
 </div>
 
+<!-- Generic typed-confirm modal used by PILOT / EXPERT actions -->
+<div class="confirm-modal" id="confirmModal" style="display:none;">
+  <div class="confirm-box">
+    <div class="confirm-title" id="confirmTitle">CONFIRM</div>
+    <div class="confirm-body" id="confirmBody">Describe the action.</div>
+    <input id="confirmInput" autocomplete="off" spellcheck="false" placeholder="type CONFIRM">
+    <div class="confirm-actions">
+      <button class="confirm-cancel" id="confirmCancel">Cancel</button>
+      <button class="confirm-go" id="confirmGo" disabled>Apply</button>
+    </div>
+    <div class="confirm-err" id="confirmErr"></div>
+  </div>
+</div>
+
+<!-- Trade drill-down modal -->
+<div class="trade-modal" id="tradeModal" style="display:none;">
+  <div class="trade-box">
+    <div class="trade-head">
+      <div>
+        <div class="trade-modal-title" id="tradeModalTitle">TRADE --</div>
+        <div class="trade-modal-sub" id="tradeModalSub">--</div>
+      </div>
+      <button class="trade-close" id="tradeClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="trade-body" id="tradeBody">loading…</div>
+  </div>
+</div>
+
+<!-- Mobile menu sheet -->
+<div class="mobile-sheet" id="mobileSheet" style="display:none;">
+  <div class="mobile-sheet-head">
+    <span>MENU</span>
+    <button class="mobile-sheet-close" id="mobileSheetClose" aria-label="Close">&times;</button>
+  </div>
+  <div class="mobile-sheet-body">
+    <div class="mobile-sheet-row"><span class="text-dim">User</span><span id="mobileUser">--</span></div>
+    <div class="mobile-sheet-row"><span class="text-dim">Sync</span><span id="mobileSync">--</span></div>
+    <div class="mobile-sheet-row"><span class="text-dim">Mode</span><span id="mobileMode">--</span></div>
+    <div class="mobile-sheet-row"><span class="text-dim">Clock</span><span id="mobileClock">--</span></div>
+    <div class="mobile-sheet-section">
+      <button class="ctrl-btn ctrl-start mobile-ctrl pilot-only" id="startBtnMobile">▶ START</button>
+      <button class="ctrl-btn ctrl-pause mobile-ctrl pilot-only" id="pauseBtnMobile">❚❚ PAUSE</button>
+      <button class="logout-btn mobile-ctrl" id="logoutBtnMobile">LOGOUT</button>
+    </div>
+  </div>
+</div>
+
 <div class="container">
 
-  <div class="grid">
+  <!-- ─── ROW 1 — HERO: Today's P&L (dominant) + Live WR + Wallet ─── -->
+  <div class="grid hero-grid">
+    <div class="card col-6 hero-card">
+      <div class="card-header">
+        <span class="card-title">Today's P&L</span>
+        <span class="card-icon">$</span>
+      </div>
+      <div class="hero-main">
+        <div class="hero-left">
+          <div class="stat-hero" id="heroTodayPnl">$0.00</div>
+          <div class="stat-sub" id="heroTodaySub">-- trades today</div>
+        </div>
+        <div class="hero-spark">
+          <svg id="heroSpark" viewBox="0 0 320 90" preserveAspectRatio="none"></svg>
+        </div>
+      </div>
+    </div>
+
+    <div class="card col-3">
+      <div class="card-header">
+        <span class="card-title">Live WR</span>
+        <span class="card-icon">%</span>
+      </div>
+      <div class="stat-big" id="winRate">--%</div>
+      <div class="stat-sub" id="winRateSub">Wilson CI --</div>
+      <div class="stat-sub" id="liveShadowDelta" style="margin-top:4px;">--</div>
+    </div>
+
     <div class="card col-3">
       <div class="card-header">
         <span class="card-title">Wallet</span>
@@ -64,121 +153,31 @@
       </div>
       <div class="stat-big" id="walletBal">$--</div>
       <div class="stat-sub" id="walletSub">USDC.e on-chain</div>
-    </div>
-
-    <div class="card col-3">
-      <div class="card-header">
-        <span class="card-title">Realized P&L</span>
-        <span class="card-icon">&Sigma;</span>
-      </div>
-      <div class="stat-big" id="netPnl">$0.00</div>
-      <div class="stat-sub" id="netPnlSub">--</div>
-    </div>
-
-    <div class="card col-3">
-      <div class="card-header">
-        <span class="card-title">Unrealized P&L</span>
-        <span class="card-icon">~</span>
-      </div>
-      <div class="stat-big" id="unrealizedPnl">$0.00</div>
-      <div class="stat-sub" id="unrealizedSub">on open positions</div>
-    </div>
-
-    <div class="card col-3">
-      <div class="card-header">
-        <span class="card-title">Win Rate</span>
-        <span class="card-icon">%</span>
-      </div>
-      <div class="stat-big" id="winRate">--%</div>
-      <div class="stat-sub" id="winRateSub">last 20: -- %</div>
+      <div class="stat-sub" id="walletDelta" style="margin-top:4px;">--</div>
     </div>
   </div>
 
-  <div class="grid" style="margin-top:18px;">
-    <div class="card col-3">
+  <!-- ─── ROW 2 — Consolidated status + cap + rails strip ─── -->
+  <div class="grid" style="margin-top:14px;">
+    <div class="card col-4">
       <div class="card-header">
-        <span class="card-title">Today's P&L</span>
-        <span class="card-icon">$</span>
+        <span class="card-title">Bot Status</span>
+        <span class="card-icon" id="botStatusIcon">&circlearrowright;</span>
       </div>
-      <div class="stat-big pos" id="todayPnl">$0.00</div>
-      <div class="stat-sub" id="todayPnlSub">-- trades today</div>
-    </div>
-
-    <div class="card col-3">
-      <div class="card-header">
-        <span class="card-title">Scale Level</span>
-        <span class="card-icon">&Delta;</span>
+      <div class="status-grid">
+        <div><span class="text-dim">state</span><span id="botStateTxt" class="text-green">--</span></div>
+        <div><span class="text-dim">heartbeat</span><span id="heartbeatAge">--</span></div>
+        <div><span class="text-dim">scans</span><span id="scanCount" class="text-green">--</span></div>
+        <div><span class="text-dim">uptime</span><span id="uptimeTxt">--</span></div>
+        <div><span class="text-dim">Chainlink WS</span><span><span class="ws-dot" id="wsDot"></span> <span id="wsText">--</span></span></div>
+        <div><span class="text-dim">next cycle</span><span id="cycleTimer">--:--</span></div>
       </div>
-      <div class="level-display">
-        <div class="level-badge" id="levelBadge">L--</div>
-        <div style="flex:1;">
-          <div style="display:flex; justify-content:space-between; font-size:0.78rem;">
-            <span class="text-dim" id="levelBetLabel">Bet size</span>
-            <span class="text-green" id="levelBet">--</span>
-          </div>
-          <div class="progress-bar">
-            <div class="progress-fill" id="levelProgress" style="width:0%"></div>
-          </div>
-          <div class="stat-sub" id="levelNextUnlock">Next level: --</div>
-        </div>
+      <div class="claude-face-row" aria-hidden="true">
+        <span class="claude-face" id="claudeFace" title="crafted with Claude Code"></span>
+        <span class="claude-status" id="claudeStatus">idle</span>
       </div>
     </div>
 
-    <div class="card col-3">
-      <div class="card-header">
-        <span class="card-title">Bot Heartbeat</span>
-        <span class="card-icon">&circlearrowright;</span>
-      </div>
-      <div class="timer-display" id="cycleTimer">--:--</div>
-      <div class="timer-label" id="cycleLabel">awaiting bot status...</div>
-      <div class="flex flex-between" style="font-size:0.72rem; margin-top:8px;">
-        <span class="text-dim">Scans total</span>
-        <span id="scanCount" class="text-green">--</span>
-      </div>
-      <div class="flex flex-between" style="font-size:0.72rem; margin-top:4px;">
-        <span class="text-dim">Chainlink WS</span>
-        <span><span class="ws-dot" id="wsDot"></span> <span id="wsText">--</span></span>
-      </div>
-    </div>
-
-    <div class="card col-3">
-      <div class="card-header">
-        <span class="card-title">Activity</span>
-        <span class="card-icon">&middot;</span>
-      </div>
-      <div>
-        <div class="flex flex-between" style="font-size:0.82rem;">
-          <span class="text-dim">Open trades</span>
-          <span class="text-green" id="openTrades">--</span>
-        </div>
-        <div class="flex flex-between" style="font-size:0.82rem; margin-top:6px;">
-          <span class="text-dim" title="Consecutive losses from most recent resolved trade">Current loss streak</span>
-          <span id="lossStreak">--</span>
-        </div>
-        <div class="flex flex-between" style="font-size:0.82rem; margin-top:6px;">
-          <span class="text-dim" title="Max loss streak within the local day">Max streak today</span>
-          <span id="maxStreakToday" class="text-dim">--</span>
-        </div>
-        <div class="flex flex-between" style="font-size:0.82rem; margin-top:6px;">
-          <span class="text-dim" title="0.25 excellent · 0.33 random · higher = worse than random">Brier</span>
-          <span id="brier">--</span>
-        </div>
-        <div class="streak-dots" id="streakDots"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Safety dashboard: kill-switch rails + daily-cap thermometer -->
-  <div class="grid" style="margin-top:18px;">
-    <div class="card col-8">
-      <div class="card-header">
-        <span class="card-title">Kill-Switch Rails</span>
-        <span class="card-icon">&#9888;</span>
-      </div>
-      <div class="rails-grid" id="railsGrid">
-        <div class="text-dim">awaiting heartbeat…</div>
-      </div>
-    </div>
     <div class="card col-4">
       <div class="card-header">
         <span class="card-title">Daily Loss Cap</span>
@@ -190,134 +189,244 @@
           <span class="text-dim" id="dailyCapUsed">$0.00</span>
           <span class="text-dim" id="dailyCapTotal">cap $--</span>
         </div>
-        <div class="stat-sub" style="margin-top:6px;" id="dailyCapNote">rail 5 daily loss cap</div>
+        <div class="stat-sub" style="margin-top:4px;" id="dailyCapNote">rail 5</div>
       </div>
-      <div class="card-section" style="margin-top:12px;">
-        <div class="card-section-label">Emergency</div>
-        <button class="estop-btn" id="estopOpenBtn" title="Pause bot now">STOP BOT NOW</button>
+      <div class="pilot-only" style="margin-top:10px;">
+        <label class="card-section-label" for="capSlider">Cap override (next UTC midnight)</label>
+        <input type="range" id="capSlider" min="50" max="500" step="25" value="50" disabled>
+        <div class="flex flex-between" style="font-size:0.68rem;">
+          <span class="text-dim">$50</span>
+          <span id="capSliderVal" class="text-green">$50</span>
+          <span class="text-dim">$500</span>
+        </div>
+        <div class="stat-sub" style="color:var(--amber);">NEEDS-MAIN-BOT endpoint to apply</div>
+      </div>
+      <button class="estop-btn hide-mobile" id="estopOpenBtn" title="Pause bot now" style="margin-top:10px;">STOP BOT NOW</button>
+    </div>
+
+    <div class="card col-4">
+      <div class="card-header">
+        <span class="card-title">Kill-Switch Rails</span>
+        <span class="card-icon">&#9888;</span>
+      </div>
+      <div class="rails-strip" id="railsStrip">
+        <!-- 5 dots rendered in JS -->
+      </div>
+      <div class="rails-detail" id="railsDetail" style="display:none;">
+        <div class="rails-grid" id="railsGrid"></div>
+      </div>
+      <div class="flex flex-between" style="margin-top:10px;">
+        <span class="stat-sub">any FIRED → auto-expand</span>
+        <button class="link-btn" id="railsToggleBtn">expand</button>
       </div>
     </div>
   </div>
 
-  <!-- Calibration + Tier Ladder -->
-  <div class="grid" style="margin-top:18px;">
-    <div class="card col-6">
-      <div class="card-header">
-        <span class="card-title">Calibration (live)</span>
-        <span class="card-icon">&#8801;</span>
-      </div>
-      <div id="calibBlock" class="calib-block">
-        <div class="text-dim">awaiting heartbeat…</div>
-      </div>
-    </div>
-    <div class="card col-6">
-      <div class="card-header">
-        <span class="card-title">Tier Ladder (per cell)</span>
-        <span class="card-icon">&#9735;</span>
-      </div>
-      <div id="tierBlock">
-        <div class="text-dim">awaiting heartbeat…</div>
-      </div>
-    </div>
-  </div>
-
-  <div class="grid" style="margin-top:18px;">
+  <!-- ─── ROW 3 — TRUST: Live-vs-Shadow delta (the live-flip question) ─── -->
+  <div class="grid" style="margin-top:14px;">
     <div class="card col-12">
       <div class="card-header">
-        <span class="card-title">Live Polymarket Positions</span>
-        <span class="card-icon">&diams;</span>
+        <span class="card-title">Live vs Shadow — per asset</span>
+        <span class="card-icon">&equiv;</span>
       </div>
-      <div class="flex" style="gap:20px; flex-wrap:wrap; margin-bottom:10px;">
-        <div style="flex:1; min-width:130px;">
-          <div class="stat-sub">Positions</div>
-          <div class="stat-big" id="posCount">--</div>
-          <div class="stat-sub" id="posStatusBreakdown">--</div>
-        </div>
-        <div style="flex:1; min-width:140px;">
-          <div class="stat-sub">Spent (cost)</div>
-          <div class="stat-big" id="posCost">$--</div>
-          <div class="stat-sub">avg entry</div>
-        </div>
-        <div style="flex:1; min-width:140px;">
-          <div class="stat-sub">Current value</div>
-          <div class="stat-big" id="posCurVal">$--</div>
-          <div class="stat-sub">on-chain</div>
-        </div>
-        <div style="flex:1; min-width:140px;">
-          <div class="stat-sub">Unrealized P&amp;L</div>
-          <div class="stat-big" id="posUnreal">$--</div>
-          <div class="stat-sub">vs entry</div>
-        </div>
+      <div id="lvsBlock">
+        <div class="text-dim empty-claude"><span class="claude-face tiny"></span> computing…</div>
       </div>
-      <table id="positionsTable">
-        <thead>
-          <tr>
-            <th>Market</th>
-            <th>Side</th>
-            <th class="td-num">Shares</th>
-            <th class="td-num">Avg</th>
-            <th class="td-num">Value</th>
-            <th class="td-num">P&amp;L</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody><tr><td colspan="7" class="text-dim">loading...</td></tr></tbody>
-      </table>
     </div>
   </div>
 
-  <div class="grid" style="margin-top:18px;">
-    <div class="card col-8">
-      <div class="card-header">
-        <span class="card-title">Cumulative P&L Curve</span>
-        <span class="card-icon">~</span>
-      </div>
-      <div class="spark-wrap">
-        <svg id="pnlSpark" viewBox="0 0 600 120" preserveAspectRatio="none"></svg>
-      </div>
-    </div>
-
+  <!-- ─── ROW 4 — WR views + Cumulative P&L ─── -->
+  <div class="grid" style="margin-top:14px;">
     <div class="card col-4">
       <div class="card-header">
         <span class="card-title">Per-Asset WR</span>
         <span class="card-icon">&bull;</span>
       </div>
-      <div class="bar-list" id="assetList">
-        <div class="text-dim">loading...</div>
-      </div>
-
+      <div class="bar-list" id="assetList"><div class="text-dim empty-claude"><span class="claude-face tiny"></span> loading…</div></div>
       <div class="card-section">
         <div class="card-section-label">WR by Timeframe</div>
-        <div class="bar-list" id="timeframeList">
-          <div class="text-dim">loading...</div>
+        <div class="bar-list" id="timeframeList"><div class="text-dim">loading…</div></div>
+      </div>
+    </div>
+
+    <div class="card col-4">
+      <div class="card-header">
+        <span class="card-title">Hourly Performance</span>
+        <span class="card-icon">h</span>
+        <span class="sort-toggle">
+          <button class="sort-btn active" data-sort="hour" id="hourSortHour">by hour</button>
+          <button class="sort-btn" data-sort="wr" id="hourSortWr">by WR</button>
+        </span>
+      </div>
+      <div class="bar-list" id="hourlyList"><div class="text-dim">loading…</div></div>
+    </div>
+
+    <div class="card col-4">
+      <div class="card-header">
+        <span class="card-title">Cumulative P&L Curve</span>
+        <span class="card-icon">~</span>
+      </div>
+      <div class="spark-wrap">
+        <svg id="pnlSpark" viewBox="0 0 600 160" preserveAspectRatio="none"></svg>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── ROW 5 — Positions (live chain) ─── -->
+  <div class="grid" style="margin-top:14px;">
+    <div class="card col-12">
+      <div class="card-header">
+        <span class="card-title">Live Polymarket Positions</span>
+        <span class="card-icon">&diams;</span>
+      </div>
+      <div class="flex pos-summary">
+        <div><div class="stat-sub">Positions</div><div class="stat-med" id="posCount">--</div><div class="stat-sub" id="posStatusBreakdown">--</div></div>
+        <div><div class="stat-sub">Spent</div><div class="stat-med" id="posCost">$--</div><div class="stat-sub">avg entry</div></div>
+        <div><div class="stat-sub">Current</div><div class="stat-med" id="posCurVal">$--</div><div class="stat-sub">on-chain</div></div>
+        <div><div class="stat-sub">Unrealized</div><div class="stat-med" id="posUnreal">$--</div><div class="stat-sub">vs entry</div></div>
+      </div>
+      <table id="positionsTable" class="compact">
+        <thead><tr><th>Market</th><th>Side</th><th class="td-num">Shares</th><th class="td-num">Avg</th><th class="td-num">Value</th><th class="td-num">P&L</th><th>Status</th></tr></thead>
+        <tbody><tr><td colspan="7" class="text-dim empty-claude"><span class="claude-face tiny"></span> idle — waiting for signal.</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ─── ROW 6 — Calibration + Tier Ladder ─── -->
+  <div class="grid" style="margin-top:14px;">
+    <div class="card col-6">
+      <div class="card-header">
+        <span class="card-title">Calibration (live)</span>
+        <span class="card-icon">&#8801;</span>
+      </div>
+      <div id="calibBlock"><div class="text-dim">awaiting heartbeat…</div></div>
+    </div>
+    <div class="card col-6">
+      <div class="card-header">
+        <span class="card-title">Tier Ladder (per cell)</span>
+        <span class="card-icon">&#9735;</span>
+        <span class="expert-only tier-override-hint text-dim" style="font-size:0.68rem;">EXPERT: click tier to override</span>
+      </div>
+      <div id="tierBlock"><div class="text-dim">no live cells yet</div></div>
+    </div>
+  </div>
+
+  <!-- ─── ROW 7 — Asset Roster (PILOT) + Rail Timeline + Near-miss ─── -->
+  <div class="grid" style="margin-top:14px;">
+    <div class="card col-4 pilot-only">
+      <div class="card-header">
+        <span class="card-title">Asset Roster</span>
+        <span class="card-icon">&#9683;</span>
+      </div>
+      <div id="assetRoster"></div>
+      <div class="stat-sub" style="color:var(--amber); margin-top:8px;">Per-asset LIVE/SHADOW toggle NEEDS-MAIN-BOT endpoint to apply at runtime. BTC-only policy enforced via `LIVE_ASSETS` env.</div>
+    </div>
+
+    <div class="card col-4">
+      <div class="card-header">
+        <span class="card-title">Rail Fire Timeline</span>
+        <span class="card-icon">&#9201;</span>
+      </div>
+      <div id="railTimeline"><div class="text-dim empty-claude"><span class="claude-face tiny"></span> no rails fired today.</div></div>
+    </div>
+
+    <div class="card col-4">
+      <div class="card-header">
+        <span class="card-title">Near-Miss Counter</span>
+        <span class="card-icon">?</span>
+      </div>
+      <div id="nearMissBlock"><div class="text-dim">awaiting heartbeat…</div></div>
+    </div>
+  </div>
+
+  <!-- ─── ROW 8 — Recent Trades (filters + drill-down) ─── -->
+  <div class="grid" style="margin-top:14px;">
+    <div class="card col-12">
+      <div class="card-header collapsible" id="tradesToggle">
+        <span><span class="card-title">Recent Trades</span> <span class="collapse-chevron" id="tradesChevron">&#9660;</span></span>
+        <span class="card-icon">&loz;</span>
+      </div>
+      <div class="card-body-collapsible" id="tradesBody">
+        <div class="trade-filters">
+          <select id="flAsset"><option value="">all assets</option></select>
+          <select id="flDir">
+            <option value="">all dirs</option>
+            <option value="UP">UP</option><option value="DOWN">DOWN</option>
+          </select>
+          <select id="flOutcome">
+            <option value="">all outcomes</option>
+            <option value="WIN">WIN</option><option value="LOSS">LOSS</option><option value="PENDING">PENDING</option>
+          </select>
+          <select id="flMode">
+            <option value="">live + shadow</option>
+            <option value="live">live only</option>
+            <option value="shadow">shadow only</option>
+          </select>
+          <select id="flConf">
+            <option value="">any conf</option>
+            <option value="lt50">&lt;50%</option>
+            <option value="50to70">50-70%</option>
+            <option value="70to85">70-85%</option>
+            <option value="ge85">&ge;85%</option>
+          </select>
+          <span class="trade-filter-count" id="tradeFilterCount">0 rows</span>
+        </div>
+        <table id="tradesTable">
+          <thead>
+            <tr>
+              <th data-sort="timestamp" class="sortable sort-desc">Time</th>
+              <th data-sort="asset" class="sortable">Asset</th>
+              <th>TF</th>
+              <th data-sort="direction" class="sortable">Dir</th>
+              <th class="td-num">Entry</th>
+              <th data-sort="size_usd" class="sortable td-num">Size</th>
+              <th data-sort="confidence" class="sortable td-num">Conf</th>
+              <th>Status</th>
+              <th data-sort="outcome" class="sortable">Outcome</th>
+              <th data-sort="pnl" class="sortable td-num">PnL</th>
+            </tr>
+          </thead>
+          <tbody><tr><td colspan="10" class="text-dim empty-claude"><span class="claude-face tiny"></span> loading…</td></tr></tbody>
+        </table>
+        <div class="trade-pager">
+          <button class="link-btn" id="tradesLoadMore">Load 50 more</button>
+          <span class="text-dim" id="tradesShownCount"></span>
         </div>
       </div>
     </div>
   </div>
 
-  <div class="grid" style="margin-top:18px;">
+  <!-- ─── ROW 9 — Slippage trend + Workshop mascot ─── -->
+  <div class="grid" style="margin-top:14px;">
+    <div class="card col-6">
+      <div class="card-header">
+        <span class="card-title">Slippage Trend</span>
+        <span class="card-icon">~</span>
+      </div>
+      <div class="spark-wrap small-spark">
+        <svg id="slipSpark" viewBox="0 0 600 120" preserveAspectRatio="none"></svg>
+      </div>
+      <div class="stat-sub" id="slipSubtitle" style="color:var(--amber); margin-top:8px;">
+        NEEDS-MAIN-BOT: `book_ask_at_signal` not in trade schema.
+      </div>
+    </div>
+
     <div class="card col-6">
       <div class="card-header">
         <span class="card-title">Polybot // Workshop</span>
         <span class="card-icon">&#9670;</span>
       </div>
-      <div class="bot-stage" id="botStage" title="click to annoy">
+      <div class="bot-stage small" id="botStage" title="click to annoy">
         <div class="bot-arrows" id="botArrows" aria-hidden="true"></div>
         <div class="bot-notebook" id="botNotebook" aria-hidden="true">
           <div class="nb-line"></div>
           <div class="nb-line short"></div>
           <div class="nb-line"></div>
         </div>
-
-        <!-- Full scene: wall, poster, plant, desk, monitor, coffee, bot -->
         <svg class="scene" viewBox="0 0 200 100" preserveAspectRatio="xMidYMax meet"
              shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg"
              aria-label="Polybot workshop scene">
-          <defs>
-            <clipPath id="screenClip"><rect x="82" y="57" width="34" height="18"/></clipPath>
-          </defs>
-
-          <!-- Back-wall grid -->
+          <defs><clipPath id="screenClip"><rect x="82" y="57" width="34" height="18"/></clipPath></defs>
           <g class="wall-grid">
             <line x1="25"  y1="0" x2="25"  y2="90"/><line x1="65"  y1="0" x2="65"  y2="90"/>
             <line x1="105" y1="0" x2="105" y2="90"/><line x1="145" y1="0" x2="145" y2="90"/>
@@ -325,20 +434,13 @@
             <line x1="0" y1="20" x2="200" y2="20"/><line x1="0" y1="45" x2="200" y2="45"/>
             <line x1="0" y1="70" x2="200" y2="70"/>
           </g>
-
-          <!-- P&L chart poster (left wall) -->
           <g class="poster">
             <rect x="18" y="10" width="38" height="22" class="poster-frame"/>
-            <polyline points="22,26 28,22 32,24 36,18 42,20 48,14 54,16"
-                      class="poster-chart" fill="none"/>
+            <polyline points="22,26 28,22 32,24 36,18 42,20 48,14 54,16" class="poster-chart" fill="none"/>
             <rect x="20" y="12" width="6" height="2" class="poster-label"/>
             <rect x="50" y="28" width="3" height="2" class="poster-dot"/>
           </g>
-
-          <!-- Floor -->
           <line x1="0" y1="90" x2="200" y2="90" class="floor"/>
-
-          <!-- Plant (left corner) -->
           <g class="plant">
             <rect x="3"  y="82" width="10" height="8" class="plant-pot"/>
             <rect x="4"  y="86" width="8"  height="1" class="plant-soil"/>
@@ -347,17 +449,11 @@
             <rect x="11" y="76" width="3"  height="5" class="plant-leaf"/>
             <rect x="5"  y="70" width="6"  height="4" class="plant-leaf"/>
           </g>
-
-          <!-- Desk -->
           <rect x="75"  y="78" width="62" height="3" class="desk-top"/>
           <rect x="78"  y="81" width="2"  height="9" class="desk-leg"/>
           <rect x="132" y="81" width="2"  height="9" class="desk-leg"/>
-
-          <!-- Chair back (peeks behind bot, to the right of monitor) -->
           <rect x="125" y="72" width="16" height="8" class="chair"/>
           <rect x="132" y="80" width="2" height="10" class="chair-leg"/>
-
-          <!-- Monitor (no transforms — each line is absolutely positioned inside the screen) -->
           <rect x="80" y="55" width="38" height="22" class="monitor-frame"/>
           <rect x="82" y="57" width="34" height="18" class="monitor-screen"/>
           <g class="monitor-content">
@@ -367,34 +463,24 @@
             <rect x="84" y="68"  width="18" height="1" class="code-line l4"/>
             <rect x="84" y="71"  width="24" height="1" class="code-line l5"/>
             <rect x="84" y="74"  width="8"  height="1" class="code-line l6"/>
-            <!-- blinking cursor on last line -->
             <rect x="93" y="74"  width="1"  height="1" class="code-cursor"/>
           </g>
           <rect x="97" y="77" width="4" height="1" class="monitor-stand"/>
-
-          <!-- Keyboard (in front of monitor, wide) -->
           <rect x="85" y="80" width="34" height="2" class="keyboard"/>
-
-          <!-- Coffee machine (right) -->
           <g class="coffee">
             <rect x="170" y="62" width="20" height="22" class="coffee-body"/>
             <rect x="173" y="78" width="14" height="2"  class="coffee-slot"/>
             <rect x="175" y="64" width="10" height="3"  class="coffee-top"/>
             <rect x="178" y="65" width="2"  height="1"  class="coffee-led"/>
             <rect x="182" y="65" width="2"  height="1"  class="coffee-led led-b"/>
-            <!-- steam -->
             <rect x="177" y="58" width="1" height="2" class="steam s1"/>
             <rect x="180" y="56" width="1" height="2" class="steam s2"/>
             <rect x="183" y="58" width="1" height="2" class="steam s3"/>
           </g>
-
-          <!-- Bot sprite — position group (routine) wraps pose group (emote) -->
           <g class="bot-pos" id="botPos">
             <g class="bot-pose" id="botAvatar">
-              <!-- Antenna -->
               <rect x="6" y="-3" width="2" height="1" class="px-dim"/>
               <rect x="6" y="-2" width="2" height="1" class="antenna-tip"/>
-              <!-- Head -->
               <rect x="3" y="-1" width="8" height="1" class="px"/>
               <rect x="2" y="0"  width="10" height="1" class="px"/>
               <rect x="2" y="1"  width="10" height="1" class="px"/>
@@ -402,27 +488,20 @@
               <rect x="8" y="1"  width="2"  height="1" class="eye"/>
               <rect x="2" y="2"  width="10" height="1" class="px"/>
               <rect x="5" y="3"  width="4"  height="1" class="mouth"/>
-              <!-- Neck -->
               <rect x="5" y="4"  width="4"  height="1" class="px-dim"/>
-              <!-- Body -->
               <rect x="2" y="5"  width="10" height="2" class="px"/>
               <rect x="6" y="6"  width="2"  height="1" class="led"/>
-              <!-- Arms (typing anim) -->
               <rect x="1"  y="5" width="1" height="2" class="arm arm-l"/>
               <rect x="12" y="5" width="1" height="2" class="arm arm-r"/>
-              <!-- Legs -->
               <rect x="3" y="7" width="2" height="2" class="leg leg-l"/>
               <rect x="9" y="7" width="2" height="2" class="leg leg-r"/>
-              <!-- Feet -->
               <rect x="3" y="9" width="3" height="1" class="px"/>
               <rect x="8" y="9" width="3" height="1" class="px"/>
-              <!-- Coffee cup (only visible during coffee scene) -->
               <rect x="13" y="0" width="3" height="2" class="cup"/>
               <rect x="13" y="-1" width="1" height="1" class="cup-steam"/>
             </g>
           </g>
         </svg>
-
         <div class="bot-speech" id="botSpeech"></div>
       </div>
       <div class="bot-stats">
@@ -431,50 +510,42 @@
         <span>L <span id="botLossCount">0</span></span>
       </div>
     </div>
+  </div>
 
-    <div class="card col-6">
+  <!-- ─── EXPERT-only: Claude reasoning console ─── -->
+  <div class="grid expert-only" style="margin-top:14px;">
+    <div class="card col-12">
       <div class="card-header">
-        <span class="card-title">Hourly Performance</span>
-        <span class="card-icon">h</span>
+        <span class="card-title">Claude Console <span class="text-dim" style="font-size:0.62rem;">(expert)</span></span>
+        <span class="card-icon">&#x25BA;</span>
       </div>
-      <div class="bar-list" id="hourlyList">
-        <div class="text-dim">loading...</div>
+      <div class="claude-console" id="claudeConsole">
+        <div class="text-dim">// expert mode · synthesised from recent trades</div>
       </div>
     </div>
   </div>
 
-  <div class="grid" style="margin-top:18px;">
-    <div class="card col-12">
-      <div class="card-header collapsible" id="tradesToggle">
-        <span>
-          <span class="card-title">Recent Trades</span>
-          <span class="collapse-chevron" id="tradesChevron">&#9660;</span>
-        </span>
-        <span class="card-icon">&loz;</span>
+  <!-- ─── Dashboard action audit trail ─── -->
+  <div class="grid" style="margin-top:14px;">
+    <div class="card col-12 audit-card">
+      <div class="card-header">
+        <span class="card-title">Dashboard Actions</span>
+        <span class="card-icon">&#9998;</span>
       </div>
-      <div class="card-body-collapsible" id="tradesBody">
-        <table id="tradesTable">
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Asset</th>
-              <th>TF</th>
-              <th>Dir</th>
-              <th class="td-num">Entry</th>
-              <th class="td-num">Size</th>
-              <th class="td-num">Conf</th>
-              <th>Status</th>
-              <th>Outcome</th>
-              <th class="td-num">PnL</th>
-            </tr>
-          </thead>
-          <tbody><tr><td colspan="9" class="text-dim">loading...</td></tr></tbody>
-        </table>
-      </div>
+      <div id="auditTrail" class="audit-trail"><div class="text-dim">no actions this session</div></div>
     </div>
   </div>
 
 </div>
+
+<!-- Sticky mobile emergency stop — always thumb-reachable -->
+<button class="sticky-estop" id="stickyEstop" title="Emergency stop">
+  <span class="sticky-estop-label">STOP BOT</span>
+</button>
+
+<footer class="site-footer">
+  <span class="footer-sig">crafted with <span class="mini-claude" aria-hidden="true"></span> <a href="https://claude.com/claude-code" target="_blank" rel="noopener">Claude Code</a></span>
+</footer>
 
 <script src="/app.js"></script>
 </body>
