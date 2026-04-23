@@ -40,11 +40,16 @@ $('logoutBtn').addEventListener('click', async () => {
   window.location.href = '/login';
 });
 
-// ─── Local Clock ───
+// ─── Local Clock + UTC tooltip (P3.4 — Austin operator) ───────
 setInterval(() => {
-  $('localTime').textContent = new Date().toLocaleTimeString([], {
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  });
+  const now = new Date();
+  const local = now.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  const utc = now.toISOString().slice(11, 19) + 'Z';
+  const clk = $('localTime');
+  if (clk) {
+    clk.textContent = `${local} · ${utc}`;
+    clk.title = 'local · UTC';
+  }
   // Refresh "last update" counter each second
   if (_lastStatusMs) {
     const age = Math.max(0, Math.floor((Date.now() - _lastStatusMs) / 1000));
@@ -62,25 +67,31 @@ let _lastStatusMs = null;
 // ─── Summary Renderer ───
 async function loadSummary() {
   const s = await api('/api/summary');
+  window.__lastSummary = s;
 
-  // Wallet balance (from bot status, pushed each cycle).
-  // Sticky: once we've seen a real value, never revert to '$--' on a stale
-  // or partial response — the on-chain USDC balance doesn't teleport to 0.
-  const walletBal = Number(s.status?.wallet_usdc || 0);
-  if (walletBal > 0) window.__lastWallet = walletBal;
-  const displayWallet = walletBal > 0 ? walletBal : (window.__lastWallet || 0);
+  // Wallet balance — on-chain ground-truth, from the same RPC+USDC.e
+  // contract the trading bot reads. Falls back to heartbeat-reported value
+  // only if RPC query failed. Never fall back to a stale sticky value, since
+  // the whole point of this card is that it reflects what's actually on-chain.
+  const onchain = (s.wallet?.onchain_usdc != null) ? Number(s.wallet.onchain_usdc) : null;
+  const heartbeatBal = Number(s.wallet?.heartbeat_usdc || 0);
+  const walletBal = onchain != null ? onchain : (heartbeatBal > 0 ? heartbeatBal : null);
   const realizedToday = Number(s.pnl?.today || 0);
   const walletEl = $('walletBal');
-  if (walletEl && displayWallet > 0) {
-    walletEl.textContent = `$${displayWallet.toFixed(2)}`;
-    walletEl.className = 'stat-big ' + (realizedToday >= 0 ? 'pos' : 'neutral');
+  if (walletEl) {
+    if (walletBal != null) {
+      walletEl.textContent = `$${walletBal.toFixed(2)}`;
+      walletEl.className = 'stat-big ' + (realizedToday >= 0 ? 'pos' : 'neutral');
+    } else {
+      walletEl.textContent = '$--';
+      walletEl.className = 'stat-big text-dim';
+    }
   }
   const walletSub = $('walletSub');
   if (walletSub) {
-    const tag = realizedToday === 0
-      ? 'USDC.e on-chain'
-      : `USDC.e on-chain · ${realizedToday > 0 ? '+' : ''}$${realizedToday.toFixed(2)} today`;
-    walletSub.textContent = tag;
+    const src = onchain != null ? 'on-chain' : (heartbeatBal > 0 ? 'heartbeat (RPC unreachable)' : '--');
+    const pnlTag = realizedToday === 0 ? '' : ` · ${fmtUsd(realizedToday)} today`;
+    walletSub.textContent = `USDC.e ${src}${pnlTag}`;
   }
 
   // Unrealized P&L (on open positions, fetched from Polymarket live)
@@ -102,8 +113,11 @@ async function loadSummary() {
   const netEl = $('netPnl');
   netEl.textContent = fmtUsd(net);
   netEl.className = 'stat-big ' + (net > 0 ? 'pos' : net < 0 ? 'neg' : 'neutral');
-  $('todayPnlSub').textContent = `${s.trades?.total || 0} total trades`;
-  $('netPnlSub').textContent = `${s.trades?.wins || 0}W / ${s.trades?.losses || 0}L`;
+  // Today's P&L sub-label shows trade count for today, not lifetime — keeps
+  // the wallet-sub "today" tag and this card in sync (P1.3 regression fix).
+  const nToday = (Number(s.wins_today || 0) + Number(s.losses_today || 0));
+  $('todayPnlSub').textContent = `${nToday} resolved today · ${s.wins_today || 0}W/${s.losses_today || 0}L`;
+  $('netPnlSub').textContent = `${s.trades?.wins || 0}W / ${s.trades?.losses || 0}L lifetime`;
 
   // WR
   const wrOverall = Number(s.win_rate?.overall || 0.5);
@@ -121,12 +135,21 @@ async function loadSummary() {
     brierEl.className = brier < 0.22 ? 'text-green' : brier < 0.27 ? 'text-amber' : 'text-red';
   }
 
-  // Streak & open
+  // Streak & open. `consec_losses` is "current streak from the most-recent
+  // resolved trade". When the latest trade is a WIN the streak is 0 — which
+  // is correct but reads as wrong, hence the explicit "current" label plus a
+  // separate "max today" metric (P1.4).
   $('openTrades').textContent = s.trades?.open ?? 0;
   const ls = Number(s.consec_losses || 0);
   const lsEl = $('lossStreak');
   lsEl.textContent = ls;
   lsEl.className = ls >= 3 ? 'text-red' : ls >= 2 ? 'text-amber' : 'text-green';
+  const mst = Number(s.max_loss_streak_today || 0);
+  const mstEl = $('maxStreakToday');
+  if (mstEl) {
+    mstEl.textContent = mst;
+    mstEl.className = mst >= 5 ? 'text-red' : mst >= 3 ? 'text-amber' : 'text-dim';
+  }
 
   // Last-sync heartbeat: how old is the bot_status push?
   const syncIso = s.status?.updated_at;
@@ -143,21 +166,26 @@ async function loadSummary() {
     dotsWrap.appendChild(d);
   });
 
-  // Status — a bot is "LIVE" only if it self-reports running AND its heartbeat
-  // is fresh. Killed bots leave running=true in the DB (no graceful shutdown),
-  // so without a staleness gate we'd falsely report them alive forever.
+  // Bot state: OFFLINE | STALE | HALTED | LIVE | PAUSED. Derived from
+  // (a) self-reported running flag, (b) heartbeat freshness from the server
+  // (age vs STALE_AFTER_SEC), (c) any active kill-switch halts.
   const running = !!s.status?.running;
-  const ageSec = _lastStatusMs ? Math.floor((Date.now() - _lastStatusMs) / 1000) : null;
-  const STALE_AFTER = 420; // 7 min > one 5-min cycle + buffer
-  const fresh = ageSec !== null && ageSec < STALE_AFTER;
-  const isLive = running && fresh;
-  // Paper banner removed — bot is live, full stop. If we ever return to
-  // paper runs, re-introduce it explicitly.
-  $('statusDot').className = 'status-dot' + (isLive ? '' : ' offline');
-  if (!running) $('statusText').textContent = 'OFFLINE';
-  else if (!fresh) $('statusText').textContent = 'STALE';
-  else $('statusText').textContent = 'LIVE';
-  $('modeText').textContent = 'LIVE TRADING';
+  const ageSec = (s.heartbeat?.age_sec != null) ? Number(s.heartbeat.age_sec) : null;
+  const fresh = !!s.heartbeat?.is_fresh;
+  const halts = Array.isArray(s.status?.killswitches) ? s.status.killswitches : [];
+  const globalHalt = halts.some(h => [1,3,4,5].includes(Number(h.rail_id)));
+  const shadow = !!s.status?.shadow_mode;
+  let state = 'UNKNOWN';
+  if (!running) state = 'OFFLINE';
+  else if (!fresh) state = 'STALE';
+  else if (globalHalt) state = 'HALTED';
+  else state = shadow ? 'SHADOW' : 'LIVE';
+
+  $('statusDot').className = 'status-dot' + (state === 'LIVE' || state === 'SHADOW' ? '' : ' offline');
+  $('statusText').textContent = state;
+  $('modeText').textContent = shadow ? 'SHADOW MODE' : 'LIVE TRADING';
+
+  renderStateBanner(state, ageSec, halts, s);
 
   // Control state — prefer the dashboard-side truth (bot_control table) over
   // the bot's self-reported echo, since the bot may take a cycle to catch up.
@@ -173,8 +201,214 @@ async function loadSummary() {
   // Live Polymarket positions (pushed on bot heartbeat)
   renderPositions(s.status || {});
 
-  if ((s.status || {}).shadow_mode) {
-    $('modeText').textContent = 'SHADOW MODE';
+  // Safety panels fed from heartbeat payload
+  renderRails(halts, s.status || {}, fresh, running);
+  renderDailyCap(s);
+  renderCalibration(s.status || {});
+  renderTierLadder(s.status || {});
+  renderScanCount(s.status || {});
+  renderWsStatus(s.status || {}, fresh, running);
+}
+
+// ─── Stale / Offline / Halt Banner ──────────────────────────────
+function renderStateBanner(state, ageSec, halts, s) {
+  const el = $('stateBanner');
+  if (!el) return;
+  const ageTxt = ageSec == null ? '--' : (ageSec >= 60 ? `${Math.floor(ageSec/60)}m ${ageSec%60}s` : `${ageSec}s`);
+  const iso = s.heartbeat?.updated_at;
+  const lastLocal = iso ? new Date(iso).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : '--';
+
+  if (state === 'OFFLINE') {
+    el.className = 'state-banner off';
+    el.innerHTML = `<strong>BOT OFFLINE</strong> — last heartbeat ${ageTxt} ago (${lastLocal} local). No scans, no orders.`;
+    el.style.display = 'block';
+  } else if (state === 'STALE') {
+    el.className = 'state-banner stale';
+    el.innerHTML = `<strong>DATA STALE</strong> — last sync ${ageTxt} ago. Bot may have crashed, check the machine.`;
+    el.style.display = 'block';
+  } else if (state === 'HALTED') {
+    const fired = halts.filter(h => [1,3,4,5].includes(Number(h.rail_id)))
+      .map(h => `#${h.rail_id} ${h.rail_name || ''}`).join(' · ');
+    el.className = 'state-banner halt';
+    el.innerHTML = `<strong>KILL-SWITCH HALT</strong> — ${fired}. Live trading blocked until cooldown/reset.`;
+    el.style.display = 'block';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+// ─── Kill-Switch Rails Panel ────────────────────────────────────
+const RAIL_META = [
+  { id: 1, name: 'Consecutive red days',    short: 'RAIL 1' },
+  { id: 2, name: 'Cell WR drift',            short: 'RAIL 2' },
+  { id: 3, name: 'Intraday drawdown 40%',    short: 'RAIL 3' },
+  { id: 4, name: 'Slippage doubling',        short: 'RAIL 4' },
+  { id: 5, name: 'Daily loss cap',           short: 'RAIL 5' },
+];
+function renderRails(halts, status, fresh, running) {
+  const wrap = $('railsGrid');
+  if (!wrap) return;
+  const byId = new Map(halts.map(h => [Number(h.rail_id), h]));
+  // One-shot rail-fire event (most recent) comes through status.killswitch_event.
+  // Active halts stream through status.killswitches. Both feed the display.
+  const lastEvt = status.killswitch_event || null;
+  wrap.innerHTML = '';
+  RAIL_META.forEach(r => {
+    const halt = byId.get(r.id);
+    let cls = 'rail-armed', label = 'ARMED', detail = '—';
+    if (halt) {
+      const cooling = halt.action === 'cooldown' || halt.action === 'cooling';
+      cls = cooling ? 'rail-cooling' : 'rail-fired';
+      label = cooling ? 'COOLING' : 'FIRED';
+      const iso = halt.fired_at_utc || halt.fired_at || '';
+      const at = iso ? new Date(iso).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : '--';
+      const det = halt.details ? JSON.stringify(halt.details).slice(0, 80) : '';
+      detail = `${at} · ${det || halt.action || ''}`;
+    } else if (lastEvt && Number(lastEvt.rail_id) === r.id) {
+      const iso = lastEvt.fired_at_utc || '';
+      const at = iso ? new Date(iso).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : '--';
+      detail = `last fired ${at}`;
+    } else if (!running || !fresh) {
+      detail = 'heartbeat stale';
+    }
+    const div = document.createElement('div');
+    div.className = `rail-cell ${cls}`;
+    div.innerHTML = `
+      <div class="rail-head">
+        <span class="rail-num">${r.short}</span>
+        <span class="rail-state">${label}</span>
+      </div>
+      <div class="rail-name">${r.name}</div>
+      <div class="rail-detail">${detail}</div>
+    `;
+    wrap.appendChild(div);
+  });
+}
+
+// ─── Daily Loss Cap Thermometer (Rail 5) ────────────────────────
+function renderDailyCap(s) {
+  const fill = $('dailyCapFill');
+  const used = $('dailyCapUsed');
+  const total = $('dailyCapTotal');
+  const note = $('dailyCapNote');
+  if (!fill) return;
+  const today = Number(s.pnl?.today || 0);
+  const loss = today < 0 ? -today : 0;
+  // Cap = max($50 × ticket_mult, 0.05 × wallet). Walletis on-chain.
+  const wallet = Number(s.wallet?.onchain_usdc || s.wallet?.heartbeat_usdc || 0);
+  const pilot = Number(s.status?.rail5_pilot_ticket_usd || 5);
+  const avgTicket = Number(s.status?.avg_ticket_today_usd || pilot);
+  const mult = Math.max(1.0, avgTicket / Math.max(pilot, 1e-6));
+  const absCap = Math.max(50 * mult, 0.05 * wallet);
+  const pct = Math.min(100, (loss / Math.max(absCap, 1)) * 100);
+  fill.style.width = `${pct.toFixed(1)}%`;
+  fill.className = 'thermo-fill ' + (pct >= 90 ? 'hot' : pct >= 60 ? 'warm' : 'cool');
+  used.textContent = loss > 0 ? `loss $${loss.toFixed(2)}` : `P&L ${fmtUsd(today)}`;
+  total.textContent = `cap $${absCap.toFixed(0)}`;
+  note.textContent = `rail 5 · mult ${mult.toFixed(2)}× · 5% of $${wallet.toFixed(0)} wallet`;
+}
+
+// ─── Current Calibration Display ────────────────────────────────
+function renderCalibration(status) {
+  const el = $('calibBlock');
+  if (!el) return;
+  const calib = status.calibration || {};
+  const sigma = calib.per_asset_sigma_mult || status.per_asset_sigma_mult || {};
+  const alpha = calib.market_blend_weight ?? status.market_blend_weight;
+  const minFairOnSide = calib.min_fair_prob_on_side ?? status.min_fair_prob_on_side;
+  const activeGates = calib.active_gates || status.active_gates || [];
+  if (!Object.keys(sigma).length && alpha == null && !activeGates.length) {
+    el.innerHTML = '<div class="text-dim">awaiting heartbeat…</div>';
+    return;
+  }
+  const sigmaRows = Object.keys(sigma).sort().map(k => `
+    <tr><td class="text-dim">${k}</td><td class="td-num">${Number(sigma[k]).toFixed(2)}×</td></tr>`).join('');
+  const gatesList = (activeGates.length ? activeGates : ['(none reported)'])
+    .map(g => `<span class="gate-chip">${g}</span>`).join(' ');
+  el.innerHTML = `
+    <div class="flex" style="gap:18px; flex-wrap:wrap;">
+      <div style="flex:1; min-width:160px;">
+        <div class="card-section-label">σ per asset</div>
+        <table class="mini-table">${sigmaRows || '<tr><td class="text-dim" colspan="2">--</td></tr>'}</table>
+      </div>
+      <div style="flex:1; min-width:160px;">
+        <div class="card-section-label">α (blend)</div>
+        <div class="stat-big pos" style="font-size:1.6rem;">${alpha != null ? Number(alpha).toFixed(2) : '--'}</div>
+        <div class="stat-sub">market-blend weight</div>
+        <div class="card-section-label" style="margin-top:10px;">min fair-on-side</div>
+        <div class="text-green">${minFairOnSide != null ? Number(minFairOnSide).toFixed(2) : '--'}</div>
+      </div>
+    </div>
+    <div class="card-section" style="margin-top:10px;">
+      <div class="card-section-label">active gates</div>
+      <div>${gatesList}</div>
+    </div>
+  `;
+}
+
+// ─── Tier Ladder per-cell ───────────────────────────────────────
+function renderTierLadder(status) {
+  const el = $('tierBlock');
+  if (!el) return;
+  const tiers = Array.isArray(status.tier_ladder) ? status.tier_ladder : [];
+  if (!tiers.length) {
+    el.innerHTML = '<div class="text-dim">no live cells yet (tier ladder empty until first live fill)</div>';
+    return;
+  }
+  const rows = tiers.map(c => {
+    const shadowDelta = (c.live_wr != null && c.shadow_wr != null)
+      ? ((Number(c.live_wr) - Number(c.shadow_wr)) * 100).toFixed(1) + 'pp'
+      : '--';
+    const pct = Math.min(100, ((c.live_n || 0) / Math.max(c.n_required || 1, 1)) * 100);
+    const cls = shadowDelta.startsWith('-') ? 'text-red' : 'text-green';
+    return `
+      <tr>
+        <td>${c.asset || '?'}/${c.timeframe || '?'}</td>
+        <td class="td-num">T${c.tier || 0}</td>
+        <td class="td-num">$${Number(c.ticket_usd || 0).toFixed(0)}</td>
+        <td>
+          <div class="tier-bar"><div class="tier-fill" style="width:${pct.toFixed(1)}%"></div></div>
+          <div class="stat-sub">${c.live_n || 0} / ${c.n_required || '--'}</div>
+        </td>
+        <td class="td-num ${cls}">${shadowDelta}</td>
+      </tr>`;
+  }).join('');
+  el.innerHTML = `
+    <table class="mini-table">
+      <thead><tr><th>cell</th><th class="td-num">tier</th><th class="td-num">ticket</th><th>progress</th><th class="td-num">Δ vs shadow</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+// ─── Scan count ticker ──────────────────────────────────────────
+function renderScanCount(status) {
+  const el = $('scanCount');
+  if (!el) return;
+  const n = status.scan_count ?? status.cycle_number ?? null;
+  el.textContent = n != null ? String(n) : '--';
+}
+
+// ─── Chainlink WS Status Light ──────────────────────────────────
+function renderWsStatus(status, fresh, running) {
+  const dot = $('wsDot');
+  const txt = $('wsText');
+  if (!dot || !txt) return;
+  // Heartbeat surfaces `chainlink_ws.connected`/`.reconnecting` (structured)
+  // or top-level `chainlink_connected` bool fallback. Without it, infer
+  // from heartbeat freshness — if the bot is pushing, something is talking
+  // to Chainlink (or the bot would have WARN'd its way into stale-strike
+  // fallbacks already).
+  const cl = status.chainlink_ws || {};
+  const connected = cl.connected ?? status.chainlink_connected;
+  const reconnecting = cl.reconnecting ?? status.chainlink_reconnecting;
+  if (!running || !fresh) {
+    dot.className = 'ws-dot off'; txt.textContent = 'unknown';
+  } else if (reconnecting) {
+    dot.className = 'ws-dot warn'; txt.textContent = 'reconnecting…';
+  } else if (connected === false) {
+    dot.className = 'ws-dot off'; txt.textContent = 'disconnected';
+  } else {
+    dot.className = 'ws-dot ok'; txt.textContent = 'connected';
   }
 }
 
@@ -250,11 +484,17 @@ function renderPositions(status) {
 // ─── Level ───
 function renderLevel(status) {
   const lvl = status.scale_level;
+  const running = !!status.running;
   if (!lvl) {
+    // Tie empty-state text to whether the bot is running. A silent "L--"
+    // with the bot off looks identical to a running bot that hasn't sent
+    // level data yet — differentiate so the operator can tell which.
     $('levelBadge').textContent = 'L--';
-    $('levelBet').textContent = '--';
+    $('levelBet').textContent = running ? 'awaiting…' : 'bot off';
     $('levelProgress').style.width = '0%';
-    $('levelNextUnlock').textContent = 'awaiting bot status...';
+    $('levelNextUnlock').textContent = running
+      ? 'awaiting bot status…'
+      : 'bot offline — no scale level';
     return;
   }
   $('levelBadge').textContent = `L${lvl.id}`;
@@ -279,9 +519,10 @@ let _cycleTimerInterval = null;
 function renderTimer(status) {
   if (_cycleTimerInterval) clearInterval(_cycleTimerInterval);
   const nextCycleIso = status.next_cycle_at;
+  const running = !!status.running;
   if (!nextCycleIso) {
     $('cycleTimer').textContent = '--:--';
-    $('cycleLabel').textContent = 'awaiting bot status...';
+    $('cycleLabel').textContent = running ? 'awaiting bot status…' : 'bot offline';
     return;
   }
   const targetMs = new Date(nextCycleIso).getTime();
@@ -296,7 +537,16 @@ function renderTimer(status) {
   _cycleTimerInterval = setInterval(tick, 1000);
 }
 
-// ─── Per-asset ───
+// ─── Per-asset — LIVE vs SHADOW distinction ──────────────────────
+// LIVE_ASSETS surfaces from the bot heartbeat (status.live_assets). Any
+// asset not in that set is shadow-only. Default to BTC until the bot
+// confirms — matches CLAUDE.md policy for today's launch.
+function liveAssets() {
+  const s = window.__lastSummary || {};
+  const la = s.status?.live_assets;
+  if (Array.isArray(la) && la.length) return new Set(la.map(a => String(a).toUpperCase()));
+  return new Set(['BTC']);
+}
 async function loadAssets() {
   const data = await api('/api/per_asset');
   const container = $('assetList');
@@ -304,14 +554,18 @@ async function loadAssets() {
     container.innerHTML = '<div class="text-dim">no data yet</div>';
     return;
   }
+  const liveSet = liveAssets();
   container.innerHTML = '';
   data.forEach(a => {
     const pct = Math.round(a.win_rate * 100);
     const cls = a.win_rate >= 0.55 ? 'good' : a.win_rate >= 0.45 ? 'mid' : 'bad';
+    const assetUpper = String(a.asset || '').toUpperCase();
+    const isLive = liveSet.has(assetUpper);
+    const badgeHtml = `<span class="mode-badge ${isLive ? 'badge-live' : 'badge-shadow'}">${isLive ? 'LIVE' : 'SHADOW'}</span>`;
     const row = document.createElement('div');
     row.className = 'bar-row';
     row.innerHTML = `
-      <div class="bar-label">${a.asset}</div>
+      <div class="bar-label">${assetUpper} ${badgeHtml}</div>
       <div class="bar-track">
         <div class="bar-fill ${cls}" style="width:${pct}%">${pct}%</div>
       </div>
@@ -624,6 +878,62 @@ function bindControls() {
   const pb = $('pauseBtn');
   if (sb) sb.addEventListener('click', () => sendControl('start'));
   if (pb) pb.addEventListener('click', () => sendControl('pause'));
+  bindEstop();
+}
+
+// ─── Emergency Stop ────────────────────────────────────────────
+// Hard pause via the same /api/bot/control endpoint — the bot reads the
+// pause flag on its next tick and declines new entries. Typed-confirm
+// modal forces a deliberate 3am action, not a thumb-slip on mobile.
+function bindEstop() {
+  const openBtn = $('estopOpenBtn');
+  const modal = $('estopModal');
+  const confirmInp = $('estopConfirm');
+  const goBtn = $('estopGo');
+  const cancelBtn = $('estopCancel');
+  const errEl = $('estopErr');
+  if (!openBtn || !modal) return;
+
+  const close = () => {
+    modal.style.display = 'none';
+    if (confirmInp) confirmInp.value = '';
+    if (goBtn) goBtn.disabled = true;
+    if (errEl) errEl.textContent = '';
+  };
+  const open = () => {
+    modal.style.display = 'flex';
+    setTimeout(() => confirmInp && confirmInp.focus(), 50);
+  };
+
+  openBtn.addEventListener('click', open);
+  cancelBtn && cancelBtn.addEventListener('click', close);
+  modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+  confirmInp && confirmInp.addEventListener('input', () => {
+    goBtn.disabled = confirmInp.value.trim().toUpperCase() !== 'STOP';
+  });
+  goBtn && goBtn.addEventListener('click', async () => {
+    goBtn.disabled = true;
+    errEl.textContent = '';
+    try {
+      const r = await fetch('/api/bot/control', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: 'pause' }),
+      });
+      if (!r.ok) {
+        let msg = `HTTP ${r.status}`;
+        try { const j = await r.json(); if (j.detail) msg = j.detail; } catch {}
+        throw new Error(msg);
+      }
+      applyControlState('pause');
+      close();
+      botSay('STOPPED.', 'bad');
+    } catch (e) {
+      errEl.textContent = `failed: ${e.message || e}`;
+      goBtn.disabled = false;
+    }
+  });
 }
 
 // ─── Top Signals (legacy, kept for back-compat if #topSignals ever re-added) ───
@@ -670,10 +980,18 @@ async function loadTrades() {
     const pnl = Number(t.pnl || 0);
     const pnlCls = pnl > 0 ? 'outcome-win' : pnl < 0 ? 'outcome-loss' : 'text-dim';
     const tf = t.timeframe || '5m';
+    // Mode column: the trade row's `shadow` flag is authoritative; fall
+    // back to the `mode` string field on pre-shadow-column rows. This
+    // disambiguates the per-row source so a mixed feed (BTC live,
+    // others shadow) reads correctly.
+    const isShadow = t.shadow === true || String(t.mode || '').toLowerCase() === 'shadow';
+    const modeBadge = isShadow
+      ? '<span class="mode-badge badge-shadow">SHADOW</span>'
+      : '<span class="mode-badge badge-live">LIVE</span>';
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="text-dim">${fmtLocalTime(t.timestamp)}</td>
-      <td>${t.asset || '--'}</td>
+      <td>${t.asset || '--'} ${modeBadge}</td>
       <td class="text-dim">${tf}</td>
       <td class="${dcls}">${dir}</td>
       <td class="td-num">$${Number(t.entry_price || 0).toFixed(3)}</td>

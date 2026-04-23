@@ -30,6 +30,9 @@ from zoneinfo import ZoneInfo
 # Override via env var if the user moves.
 USER_TZ = ZoneInfo(os.getenv("USER_TZ", "America/Chicago"))
 
+import time as _time
+
+import httpx
 from fastapi import Cookie, FastAPI, Header, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -45,6 +48,24 @@ from _security import (  # noqa: E402
 )
 
 SESSION_COOKIE = "polybot_session"
+
+# Wallet address + Polygon RPC — matches what `core/trader.py:get_balance()` does.
+# This is the operator's EOA (derived from POLY_PRIVATE_KEY on the bot side).
+# Sourced from env var so rotating wallets does not require a code change.
+WALLET_ADDRESS = os.getenv(
+    "WALLET_ADDRESS",
+    "0x78789Ca94AAC0ac697255DF7e429a6888Ac29b26",
+).lower()
+POLYGON_RPC_URL = os.getenv(
+    "POLYGON_RPC_URL",
+    "https://polygon-bor-rpc.publicnode.com",
+)
+USDC_E_CONTRACT = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+
+# Cache the last successful on-chain read across warm serverless invocations
+# so we do not hammer the public RPC on every dashboard poll (3s cadence).
+_wallet_cache: Dict[str, Any] = {"balance": None, "fetched_at": 0.0}
+_WALLET_CACHE_TTL_SEC = 30
 
 app = FastAPI(
     title="PolyBot Dashboard",
@@ -63,6 +84,52 @@ if _origins:
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Content-Type", "Authorization"],
     )
+
+
+# ─────────────────────────────────────────────────────────
+# ON-CHAIN WALLET READER
+#   Mirrors core/trader.py:get_balance() exactly — same RPC,
+#   same USDC.e contract, same balanceOf() call. Raw JSON-RPC
+#   avoids the web3.py cold-start overhead on Vercel.
+# ─────────────────────────────────────────────────────────
+def _fetch_wallet_usdc() -> Optional[float]:
+    """Return on-chain USDC.e balance in USD, or None on failure."""
+    now = _time.time()
+    cached = _wallet_cache.get("balance")
+    if cached is not None and now - _wallet_cache["fetched_at"] < _WALLET_CACHE_TTL_SEC:
+        return float(cached)
+
+    addr = WALLET_ADDRESS
+    if not addr.startswith("0x") or len(addr) != 42:
+        return None
+    # balanceOf(address) selector = 0x70a08231
+    padded = "0" * 24 + addr[2:].lower()
+    data = "0x70a08231" + padded
+
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_call",
+        "params": [
+            {"to": USDC_E_CONTRACT, "data": data},
+            "latest",
+        ],
+    }
+    try:
+        with httpx.Client(timeout=4.0) as c:
+            r = c.post(POLYGON_RPC_URL, json=payload)
+            if r.status_code != 200:
+                return cached if cached is not None else None
+            result = r.json().get("result")
+            if not result:
+                return cached if cached is not None else None
+            raw = int(result, 16)
+            bal = raw / 1e6
+            _wallet_cache["balance"] = bal
+            _wallet_cache["fetched_at"] = now
+            return bal
+    except Exception:
+        return cached if cached is not None else None
 
 
 # ─────────────────────────────────────────────────────────
@@ -173,6 +240,23 @@ async def summary(response: Response, polybot_session: Optional[str] = Cookie(No
         limit=1000,
     )
 
+    # On-chain wallet — ground-truth, independent of heartbeat freshness.
+    onchain_usdc = _fetch_wallet_usdc()
+
+    # Heartbeat freshness: bot pushes `status` at least every cycle (~5 min).
+    # 7 min = 1 cycle + slack. Past that, the bot is either crashed or offline
+    # and the dashboard must say so loudly rather than display a stale value.
+    status_updated_at = status.get("updated_at")
+    age_sec: Optional[int] = None
+    if status_updated_at:
+        try:
+            ts = datetime.fromisoformat(str(status_updated_at).replace("Z", "+00:00"))
+            age_sec = int((datetime.now(timezone.utc) - ts).total_seconds())
+        except Exception:
+            age_sec = None
+    STALE_AFTER_SEC = int(os.getenv("STALE_AFTER_SEC", "420"))
+    is_fresh = age_sec is not None and age_sec < STALE_AFTER_SEC
+
     out: Dict = {
         "status": status,
         "control_state": control_state,
@@ -181,8 +265,24 @@ async def summary(response: Response, polybot_session: Optional[str] = Cookie(No
         "trades": {"total": 0, "open": 0, "wins": 0, "losses": 0},
         "brier": 0.25,
         "consec_losses": 0,
+        "max_loss_streak_today": 0,
+        "losses_today": 0,
+        "wins_today": 0,
         "last_10": [],
         "now_utc": datetime.now(timezone.utc).isoformat(),
+        "wallet": {
+            "onchain_usdc": onchain_usdc,
+            "heartbeat_usdc": status.get("wallet_usdc"),
+            "fetched_at": datetime.fromtimestamp(
+                _wallet_cache["fetched_at"] or _time.time(), tz=timezone.utc,
+            ).isoformat() if onchain_usdc is not None else None,
+        },
+        "heartbeat": {
+            "age_sec": age_sec,
+            "is_fresh": is_fresh,
+            "stale_after_sec": STALE_AFTER_SEC,
+            "updated_at": status_updated_at,
+        },
     }
 
     if not trades:
@@ -203,12 +303,33 @@ async def summary(response: Response, polybot_session: Optional[str] = Cookie(No
             return None
 
     today_pnl = 0.0
-    for t in trades:
-        pt = _parse_ts(t.get("timestamp") or "")
-        if pt and pt >= day_start_utc:
-            today_pnl += float(t["pnl"] or 0)
+    wins_today = 0
+    losses_today = 0
+    max_streak_today = 0
+    cur_streak = 0
+    # Trades are ordered timestamp.desc from the query. Walk chronologically
+    # (oldest-first) to compute max-streak-today correctly.
+    today_rows_asc = [
+        t for t in reversed(trades)
+        if (pt := _parse_ts(t.get("timestamp") or "")) and pt >= day_start_utc
+    ]
+    for t in today_rows_asc:
+        pnl_val = float(t["pnl"] or 0)
+        today_pnl += pnl_val
+        oc = t.get("outcome")
+        if oc == "WIN":
+            wins_today += 1
+            cur_streak = 0
+        elif oc == "LOSS":
+            losses_today += 1
+            cur_streak += 1
+            if cur_streak > max_streak_today:
+                max_streak_today = cur_streak
     net_pnl = sum(float(t["pnl"] or 0) for t in trades)
     out["pnl"] = {"today": today_pnl, "net": net_pnl}
+    out["wins_today"] = wins_today
+    out["losses_today"] = losses_today
+    out["max_loss_streak_today"] = max_streak_today
 
     wins = sum(1 for t in trades if t["outcome"] == "WIN")
     losses = sum(1 for t in trades if t["outcome"] == "LOSS")
@@ -243,6 +364,23 @@ async def summary(response: Response, polybot_session: Optional[str] = Cookie(No
         out["last_10"] = [t["outcome"] for t in resolved[:10]]
 
     return out
+
+
+@app.get("/api/wallet")
+async def wallet(polybot_session: Optional[str] = Cookie(None)):
+    """On-chain USDC.e balance. Session-authenticated — same auth as
+    all other data endpoints. Separate polling path so mobile refresh
+    does not wait on Supabase when the user only needs the balance."""
+    require_session(polybot_session)
+    bal = _fetch_wallet_usdc()
+    fetched_ts = _wallet_cache["fetched_at"]
+    return {
+        "onchain_usdc": bal,
+        "address": WALLET_ADDRESS,
+        "fetched_at": datetime.fromtimestamp(
+            fetched_ts or _time.time(), tz=timezone.utc,
+        ).isoformat() if bal is not None else None,
+    }
 
 
 @app.get("/api/trades")

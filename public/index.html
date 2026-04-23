@@ -33,6 +33,27 @@
   </div>
 </div>
 
+<!-- Bot-state banner: OFFLINE / STALE / RUNNING / HALTED. Always present,
+     hidden when bot is healthy. Top of page so nothing obscures it on mobile. -->
+<div class="state-banner" id="stateBanner" style="display:none;"></div>
+<!-- Emergency-stop confirmation modal -->
+<div class="estop-modal" id="estopModal" style="display:none;">
+  <div class="estop-box">
+    <div class="estop-title">EMERGENCY STOP</div>
+    <div class="estop-body">
+      This pauses the bot immediately. The bot process keeps running but will
+      place no new orders until you press START again.<br><br>
+      Type <code>STOP</code> to confirm.
+    </div>
+    <input id="estopConfirm" autocomplete="off" spellcheck="false" placeholder="type STOP">
+    <div class="estop-actions">
+      <button class="estop-cancel" id="estopCancel">Cancel</button>
+      <button class="estop-go" id="estopGo" disabled>Stop bot</button>
+    </div>
+    <div class="estop-err" id="estopErr"></div>
+  </div>
+</div>
+
 <div class="container">
 
   <div class="grid">
@@ -105,11 +126,19 @@
 
     <div class="card col-3">
       <div class="card-header">
-        <span class="card-title">Next Cycle</span>
+        <span class="card-title">Bot Heartbeat</span>
         <span class="card-icon">&circlearrowright;</span>
       </div>
       <div class="timer-display" id="cycleTimer">--:--</div>
       <div class="timer-label" id="cycleLabel">awaiting bot status...</div>
+      <div class="flex flex-between" style="font-size:0.72rem; margin-top:8px;">
+        <span class="text-dim">Scans total</span>
+        <span id="scanCount" class="text-green">--</span>
+      </div>
+      <div class="flex flex-between" style="font-size:0.72rem; margin-top:4px;">
+        <span class="text-dim">Chainlink WS</span>
+        <span><span class="ws-dot" id="wsDot"></span> <span id="wsText">--</span></span>
+      </div>
     </div>
 
     <div class="card col-3">
@@ -123,14 +152,71 @@
           <span class="text-green" id="openTrades">--</span>
         </div>
         <div class="flex flex-between" style="font-size:0.82rem; margin-top:6px;">
-          <span class="text-dim">Loss streak</span>
+          <span class="text-dim" title="Consecutive losses from most recent resolved trade">Current loss streak</span>
           <span id="lossStreak">--</span>
         </div>
         <div class="flex flex-between" style="font-size:0.82rem; margin-top:6px;">
-          <span class="text-dim">Brier</span>
+          <span class="text-dim" title="Max loss streak within the local day">Max streak today</span>
+          <span id="maxStreakToday" class="text-dim">--</span>
+        </div>
+        <div class="flex flex-between" style="font-size:0.82rem; margin-top:6px;">
+          <span class="text-dim" title="0.25 excellent · 0.33 random · higher = worse than random">Brier</span>
           <span id="brier">--</span>
         </div>
         <div class="streak-dots" id="streakDots"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Safety dashboard: kill-switch rails + daily-cap thermometer -->
+  <div class="grid" style="margin-top:18px;">
+    <div class="card col-8">
+      <div class="card-header">
+        <span class="card-title">Kill-Switch Rails</span>
+        <span class="card-icon">&#9888;</span>
+      </div>
+      <div class="rails-grid" id="railsGrid">
+        <div class="text-dim">awaiting heartbeat…</div>
+      </div>
+    </div>
+    <div class="card col-4">
+      <div class="card-header">
+        <span class="card-title">Daily Loss Cap</span>
+        <span class="card-icon">$</span>
+      </div>
+      <div class="thermo-wrap">
+        <div class="thermo-bar"><div class="thermo-fill" id="dailyCapFill" style="width:0%"></div></div>
+        <div class="flex flex-between" style="font-size:0.72rem; margin-top:6px;">
+          <span class="text-dim" id="dailyCapUsed">$0.00</span>
+          <span class="text-dim" id="dailyCapTotal">cap $--</span>
+        </div>
+        <div class="stat-sub" style="margin-top:6px;" id="dailyCapNote">rail 5 daily loss cap</div>
+      </div>
+      <div class="card-section" style="margin-top:12px;">
+        <div class="card-section-label">Emergency</div>
+        <button class="estop-btn" id="estopOpenBtn" title="Pause bot now">STOP BOT NOW</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Calibration + Tier Ladder -->
+  <div class="grid" style="margin-top:18px;">
+    <div class="card col-6">
+      <div class="card-header">
+        <span class="card-title">Calibration (live)</span>
+        <span class="card-icon">&#8801;</span>
+      </div>
+      <div id="calibBlock" class="calib-block">
+        <div class="text-dim">awaiting heartbeat…</div>
+      </div>
+    </div>
+    <div class="card col-6">
+      <div class="card-header">
+        <span class="card-title">Tier Ladder (per cell)</span>
+        <span class="card-icon">&#9735;</span>
+      </div>
+      <div id="tierBlock">
+        <div class="text-dim">awaiting heartbeat…</div>
       </div>
     </div>
   </div>
