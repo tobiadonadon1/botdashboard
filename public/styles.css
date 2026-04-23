@@ -1759,8 +1759,9 @@ th.sort-desc::after { content: '▼'; opacity: 0.8; color: var(--green-bright); 
 
   .sticky-estop { display: inline-flex; align-items: center; }
 
-  /* Push sticky estop above footer */
-  .site-footer { padding-bottom: 70px; }
+  /* Push the last card above the sticky STOP FAB. Footer was removed,
+     so the buffer lives on the container now. */
+  .container { padding-bottom: 90px; }
 }
 
 @media (max-width: 480px) {
