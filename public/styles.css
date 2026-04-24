@@ -1164,9 +1164,16 @@ body.paper .topbar { border-bottom-color: rgba(212, 170, 60, 0.35); }
 .strategy-row.pnl-pos > span:last-child { color: var(--green-bright); }
 .strategy-row.pnl-neg > span:last-child { color: var(--red); }
 
-/* Mobile: stack CORE and EARLY columns, tighten padding. 700px matches
-   the point where two side-by-side columns start feeling cramped in a
-   col-12 card even before the full-mobile breakpoint. */
+/* Tablet (≤900px): three side-by-side strategy columns get cramped in a
+   col-12 card; drop to two columns and let the third wrap to its own row. */
+@media (max-width: 900px) {
+  .strategy-compare {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+/* Mobile (≤700px): full stack, tighten gap + padding. Keeps the SCALP
+   trigger-breakdown row inside the column when there's only one column
+   wide enough to hold the 'TP X% · SL Y%' text. */
 @media (max-width: 700px) {
   .strategy-compare {
     grid-template-columns: 1fr;
@@ -1174,6 +1181,19 @@ body.paper .topbar { border-bottom-color: rgba(212, 170, 60, 0.35); }
   }
   .strategy-col {
     padding: 12px 14px;
+  }
+}
+/* Phone (≤600px): tighter still, matches the rest of the dashboard's
+   600px breakpoint. */
+@media (max-width: 600px) {
+  .strategy-col {
+    padding: 10px 12px;
+  }
+  .strategy-row {
+    font-size: 0.78rem;
+  }
+  .strategy-trig-row .trig-vals {
+    font-size: 0.68rem;
   }
 }
 
