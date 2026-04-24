@@ -397,6 +397,7 @@ async def trades(
       • strategy=expiry_convergence → core strategy only (NULLs included
                                        so legacy rows stay visible)
       • strategy=early_entry        → early strategy only
+      • strategy=scalp_exit         → scalp strategy only
       • omit                        → all rows (backwards-compatible)
     """
     sess = require_session(polybot_session)
@@ -414,46 +415,35 @@ async def trades(
             filters["or"] = "(strategy_label.eq.expiry_convergence,strategy_label.is.null)"
         elif s_norm == "early_entry":
             filters["strategy_label"] = "eq.early_entry"
+        elif s_norm == "scalp_exit":
+            filters["strategy_label"] = "eq.scalp_exit"
+    # Column lists per fallback layer. Newest-added columns first so they
+    # get dropped earliest if the DB schema hasn't caught up.
+    _COLS_FULL = "trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode,shadow,strategy_label,exit_trigger,entry_bid,exit_bid,realized_pnl_partial"
+    _COLS_NO_SCALP = "trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode,shadow,strategy_label"
+    _COLS_NO_STRAT = "trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode,shadow"
+    _COLS_NO_SHADOW = "trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode"
+    _COLS_BASE = "trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time"
     try:
-        rows = db().select(
-            "trades",
-            columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode,shadow,strategy_label",
-            filters=filters,
-            order="timestamp.desc",
-            limit=int(limit),
-        )
+        rows = db().select("trades", columns=_COLS_FULL, filters=filters, order="timestamp.desc", limit=int(limit))
     except Exception:
-        # Fallback 1: no strategy_label column yet — drop the filter too,
-        # otherwise PostgREST would still 4xx on the missing column.
-        filters.pop("strategy_label", None)
-        filters.pop("or", None)
+        # Fallback 1: scalp_exit telemetry columns missing.
         try:
-            rows = db().select(
-                "trades",
-                columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode,shadow",
-                filters=filters,
-                order="timestamp.desc",
-                limit=int(limit),
-            )
+            rows = db().select("trades", columns=_COLS_NO_SCALP, filters=filters, order="timestamp.desc", limit=int(limit))
         except Exception:
-            # Fallback 2: no shadow column yet
-            filters.pop("shadow", None)
+            # Fallback 2: no strategy_label column yet — drop the filter too,
+            # otherwise PostgREST would still 4xx on the missing column.
+            filters.pop("strategy_label", None)
+            filters.pop("or", None)
             try:
-                rows = db().select(
-                    "trades",
-                    columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode",
-                    filters=filters,
-                    order="timestamp.desc",
-                    limit=int(limit),
-                )
+                rows = db().select("trades", columns=_COLS_NO_STRAT, filters=filters, order="timestamp.desc", limit=int(limit))
             except Exception:
-                rows = db().select(
-                    "trades",
-                    columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time",
-                    filters=filters,
-                    order="timestamp.desc",
-                    limit=int(limit),
-                )
+                # Fallback 3: no shadow column yet.
+                filters.pop("shadow", None)
+                try:
+                    rows = db().select("trades", columns=_COLS_NO_SHADOW, filters=filters, order="timestamp.desc", limit=int(limit))
+                except Exception:
+                    rows = db().select("trades", columns=_COLS_BASE, filters=filters, order="timestamp.desc", limit=int(limit))
     for r in rows:
         # Backfill: legacy rows without strategy_label default to core
         # (expiry_convergence) so the dashboard renders consistently.
@@ -786,12 +776,12 @@ async def bot_push(
         for r in rows:
             if not r.get("trade_id"):
                 raise HTTPException(status_code=400, detail="trade.data.trade_id required")
-            # Strategy label: only two values allowed, anything else (including
-            # null/missing) falls back to expiry_convergence. Keeps older bot
-            # builds (pre-strategy-split) compatible with the new schema.
+            # Strategy label: known values are expiry_convergence, early_entry,
+            # scalp_exit. Null/missing/unknown falls back to expiry_convergence.
+            # Keeps older bot builds (pre-strategy-split) compatible.
             raw_strat = r.get("strategy_label")
             strat = str(raw_strat).strip() if raw_strat else "expiry_convergence"
-            if strat not in ("expiry_convergence", "early_entry"):
+            if strat not in ("expiry_convergence", "early_entry", "scalp_exit"):
                 strat = "expiry_convergence"
             payload.append({
                 "user_id": uid,
@@ -812,30 +802,46 @@ async def bot_push(
                 "mode": r.get("mode"),
                 "shadow": bool(r.get("shadow", False)),
                 "strategy_label": strat,
+                # scalp_exit telemetry. Stored on every row but only meaningful
+                # for scalp_exit; NULL on core/early. No server-side validation
+                # of exit_trigger string - bot is the source of truth.
+                "exit_trigger": r.get("exit_trigger"),
+                "entry_bid": r.get("entry_bid"),
+                "exit_bid": r.get("exit_bid"),
+                "realized_pnl_partial": r.get("realized_pnl_partial"),
             })
         try:
             s.upsert("trades", payload, on_conflict="user_id,trade_id")
         except Exception:
-            # Cascading retry — drop newest optional column first, fall back to
+            # Cascading retry - drop newest optional columns first, fall back to
             # progressively older shapes if the DB hasn't been migrated yet.
+            # Layer 0 = scalp_exit telemetry (4 cols added together).
             for p in payload:
-                p.pop("strategy_label", None)
+                p.pop("exit_trigger", None)
+                p.pop("entry_bid", None)
+                p.pop("exit_bid", None)
+                p.pop("realized_pnl_partial", None)
             try:
                 s.upsert("trades", payload, on_conflict="user_id,trade_id")
             except Exception:
                 for p in payload:
-                    p.pop("shadow", None)
+                    p.pop("strategy_label", None)
                 try:
                     s.upsert("trades", payload, on_conflict="user_id,trade_id")
                 except Exception:
                     for p in payload:
-                        p.pop("mode", None)
+                        p.pop("shadow", None)
                     try:
                         s.upsert("trades", payload, on_conflict="user_id,trade_id")
                     except Exception:
                         for p in payload:
-                            p.pop("timeframe", None)
-                        s.upsert("trades", payload, on_conflict="user_id,trade_id")
+                            p.pop("mode", None)
+                        try:
+                            s.upsert("trades", payload, on_conflict="user_id,trade_id")
+                        except Exception:
+                            for p in payload:
+                                p.pop("timeframe", None)
+                            s.upsert("trades", payload, on_conflict="user_id,trade_id")
         return {"ok": True, "type": "trade", "count": len(payload)}
 
     if kind == "signal":
