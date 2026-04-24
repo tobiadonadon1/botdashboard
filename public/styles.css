@@ -1097,6 +1097,64 @@ body.paper .topbar { border-bottom-color: rgba(212, 170, 60, 0.35); }
 }
 .filter-select option { background: var(--bg-secondary); color: var(--text); }
 
+/* ─── Strategy Comparison Panel ─────────────────────────────── */
+.strategy-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+.strategy-col {
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  padding: 14px 16px;
+  background: rgba(8, 14, 18, 0.45);
+}
+.strategy-col.col-core {
+  border-color: rgba(88, 181, 128, 0.35);
+}
+.strategy-col.col-early {
+  border-color: rgba(212, 170, 60, 0.45);
+  background: rgba(212, 170, 60, 0.04);
+}
+.strategy-col-header {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.strategy-col.col-core .strategy-col-header { color: var(--green); }
+.strategy-col.col-early .strategy-col-header { color: var(--amber); }
+.strategy-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.strategy-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  padding: 2px 0;
+}
+.strategy-row > span:first-child {
+  font-size: 0.66rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.strategy-row > span:last-child {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.strategy-row.pnl-pos > span:last-child { color: var(--green-bright); }
+.strategy-row.pnl-neg > span:last-child { color: var(--red); }
+
 /* ─── Kill-switch rails grid ────────────────────────────────── */
 .rails-grid {
   display: grid;

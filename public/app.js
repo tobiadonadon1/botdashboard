@@ -866,6 +866,77 @@ function renderAssetRoster(status) {
   `).join('');
 }
 
+// ─── Strategy Comparison (CORE vs EARLY) ────────────────────────
+// Wilson 95% CI — standard score interval. Much better than the naive
+// sqrt(p*(1-p)/n) at small n and near 0/1, which is exactly the regime
+// a brand-new early_entry strategy will spend most of its first week in.
+function wilson95(w, n) {
+  if (n <= 0) return [0, 0];
+  const z = 1.96;
+  const p = w / n;
+  const denom = 1 + (z * z) / n;
+  const center = p + (z * z) / (2 * n);
+  const margin = z * Math.sqrt((p * (1 - p) / n) + (z * z) / (4 * n * n));
+  const lo = (center - margin) / denom;
+  const hi = (center + margin) / denom;
+  // Clamp to [0, 1] - numerical drift at the 0/n and n/n edges can produce
+  // values like -1e-17 or 1.0000000001 that would render as '-0.0%' / '100.0%'.
+  return [Math.max(0, lo), Math.min(1, hi)];
+}
+
+function _fmtPF(b) {
+  if (b.profit_factor != null) return Number(b.profit_factor).toFixed(2);
+  // Server returns null for 'no losses' — the client disambiguates using
+  // the W/L counts so a strategy with wins and zero losses reads as ∞
+  // rather than the same '--' we use for 'no data at all'.
+  if (Number(b.l) === 0 && Number(b.w) > 0) return '∞';
+  return '--';
+}
+function _fmtWilson(w, n) {
+  if (!n) return '--';
+  const [lo, hi] = wilson95(Number(w), Number(n));
+  return `${(lo * 100).toFixed(1)}-${(hi * 100).toFixed(1)}%`;
+}
+function _strategyCol(b, label, colClass) {
+  const net = Number(b.net_pnl || 0);
+  const netCls = net > 0 ? 'pnl-pos' : net < 0 ? 'pnl-neg' : '';
+  const wrTxt = b.n ? `${(Number(b.wr) * 100).toFixed(1)}%` : '--';
+  const askTxt = b.mean_ask ? `$${Number(b.mean_ask).toFixed(3)}` : '--';
+  return `
+    <div class="strategy-col ${colClass}">
+      <div class="strategy-col-header">${label}</div>
+      <div class="strategy-rows">
+        <div class="strategy-row"><span>n</span><span>${b.n}</span></div>
+        <div class="strategy-row"><span>w / l</span><span>${b.w} / ${b.l}</span></div>
+        <div class="strategy-row"><span>wr</span><span>${wrTxt}</span></div>
+        <div class="strategy-row"><span>wilson 95%</span><span>${_fmtWilson(b.w, b.n)}</span></div>
+        <div class="strategy-row ${netCls}"><span>net pnl</span><span>${fmtUsd(net)}</span></div>
+        <div class="strategy-row"><span>mean ask</span><span>${askTxt}</span></div>
+        <div class="strategy-row"><span>profit factor</span><span>${_fmtPF(b)}</span></div>
+      </div>
+    </div>
+  `;
+}
+async function loadStrategyCompare() {
+  const el = $('strategyCompare');
+  if (!el) return;
+  let data;
+  try {
+    data = await api('/api/strategy_compare');
+  } catch (e) {
+    if (e.message !== 'unauth') console.warn('strategy_compare err', e);
+    return;
+  }
+  const empty = { n: 0, w: 0, l: 0, wr: 0, net_pnl: 0, mean_ask: 0, profit_factor: null };
+  const core = data.expiry_convergence || empty;
+  const early = data.early_entry || empty;
+  if (!core.n && !early.n) {
+    el.innerHTML = '<div class="text-dim">no resolved trades yet</div>';
+    return;
+  }
+  el.innerHTML = _strategyCol(core, 'CORE', 'col-core') + _strategyCol(early, 'EARLY', 'col-early');
+}
+
 // ─── Trades: filter + sort + paginate + drill-down ─────────
 let _trades = [];
 let _tradesLimit = 50;
@@ -1437,6 +1508,7 @@ async function refreshAll() {
       loadTrades(),
       loadPnlChart(),
       loadLiveVsShadow(),
+      loadStrategyCompare(),
     ]);
     renderSlippage();
     if (document.body.classList.contains('mode-expert')) renderClaudeConsole();

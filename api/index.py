@@ -475,6 +475,88 @@ async def trades(
     return rows
 
 
+@app.get("/api/strategy_compare")
+async def strategy_compare(polybot_session: Optional[str] = Cookie(None)):
+    """Per-strategy aggregate (n, W/L, net PNL, mean ask, profit factor).
+
+    Wilson 95% CI is computed client-side from n and W (cheaper than
+    sending two extra floats and keeps the math co-located with the
+    display). Open trades are excluded - resolved rows only, matching
+    the rest of the dashboard's WR/PNL math.
+    """
+    sess = require_session(polybot_session)
+    uid = sess["user_id"]
+    try:
+        rows = db().select(
+            "trades",
+            columns="outcome,pnl,entry_price,strategy_label",
+            filters={"user_id": f"eq.{uid}"},
+            limit=10000,
+        )
+    except Exception:
+        # Pre-migration DB: no strategy_label column. Treat every row as core.
+        rows = db().select(
+            "trades",
+            columns="outcome,pnl,entry_price",
+            filters={"user_id": f"eq.{uid}"},
+            limit=10000,
+        )
+        for r in rows:
+            r["strategy_label"] = "expiry_convergence"
+
+    def _empty() -> Dict:
+        return {"n": 0, "w": 0, "l": 0, "net": 0.0, "asks": [], "wins_pnl": 0.0, "loss_pnl": 0.0}
+
+    agg = {"expiry_convergence": _empty(), "early_entry": _empty()}
+    for r in rows:
+        oc = r.get("outcome")
+        if oc not in ("WIN", "LOSS"):
+            continue
+        label = r.get("strategy_label") or "expiry_convergence"
+        if label not in agg:
+            label = "expiry_convergence"
+        b = agg[label]
+        b["n"] += 1
+        if oc == "WIN":
+            b["w"] += 1
+        else:
+            b["l"] += 1
+        pnl = float(r.get("pnl") or 0)
+        b["net"] += pnl
+        if pnl > 0:
+            b["wins_pnl"] += pnl
+        elif pnl < 0:
+            b["loss_pnl"] += abs(pnl)
+        ep = r.get("entry_price")
+        if ep is not None:
+            try:
+                b["asks"].append(float(ep))
+            except (TypeError, ValueError):
+                pass
+
+    out: Dict[str, Dict] = {}
+    for label, b in agg.items():
+        wr = b["w"] / b["n"] if b["n"] else 0.0
+        mean_ask = sum(b["asks"]) / len(b["asks"]) if b["asks"] else 0.0
+        # Profit factor: sum(wins) / sum(|losses|). null when undefined
+        # (no losses, or no resolved trades). Client handles 'no losses but
+        # wins' as ∞ from the (l == 0, w > 0) condition.
+        if b["loss_pnl"] > 0:
+            pf: Optional[float] = b["wins_pnl"] / b["loss_pnl"]
+        else:
+            pf = None
+        out[label] = {
+            "n": b["n"],
+            "w": b["w"],
+            "l": b["l"],
+            "wr": wr,
+            "net_pnl": b["net"],
+            "mean_ask": mean_ask,
+            "profit_factor": pf,
+        }
+    return out
+
+
 @app.get("/api/per_asset")
 async def per_asset(polybot_session: Optional[str] = Cookie(None)):
     sess = require_session(polybot_session)
