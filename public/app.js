@@ -897,11 +897,35 @@ function _fmtWilson(w, n) {
   const [lo, hi] = wilson95(Number(w), Number(n));
   return `${(lo * 100).toFixed(1)}-${(hi * 100).toFixed(1)}%`;
 }
+// Format the SCALP-only trigger breakdown as 'TP 50% · SL 25% · TIME 12% · RES 12%'.
+// Buckets that are 0 are omitted so a fresh strategy doesn't read as four zeros.
+function _fmtTriggers(triggers) {
+  if (!triggers) return '--';
+  const order = [['take_profit', 'TP'], ['stop_loss', 'SL'], ['time_exit', 'TIME'], ['resolution', 'RES'], ['other', 'OTHER']];
+  const total = order.reduce((s, [k]) => s + (Number(triggers[k]) || 0), 0);
+  if (!total) return '--';
+  const parts = [];
+  for (const [k, label] of order) {
+    const c = Number(triggers[k]) || 0;
+    if (!c) continue;
+    parts.push(`${label} ${Math.round((c / total) * 100)}%`);
+  }
+  return parts.join(' · ');
+}
 function _strategyCol(b, label, colClass) {
   const net = Number(b.net_pnl || 0);
   const netCls = net > 0 ? 'pnl-pos' : net < 0 ? 'pnl-neg' : '';
   const wrTxt = b.n ? `${(Number(b.wr) * 100).toFixed(1)}%` : '--';
   const askTxt = b.mean_ask ? `$${Number(b.mean_ask).toFixed(3)}` : '--';
+  // Trigger breakdown is only meaningful for the SCALP column. Server returns
+  // .triggers only on scalp_exit; check for it here so this helper stays
+  // generic for the other two columns.
+  const trigBlock = b.triggers
+    ? `<div class="strategy-trig-row">
+         <span class="trig-label">exit triggers</span>
+         <span class="trig-vals">${_fmtTriggers(b.triggers)}</span>
+       </div>`
+    : '';
   return `
     <div class="strategy-col ${colClass}">
       <div class="strategy-col-header">${label}</div>
@@ -914,6 +938,7 @@ function _strategyCol(b, label, colClass) {
         <div class="strategy-row"><span>mean ask</span><span>${askTxt}</span></div>
         <div class="strategy-row"><span>profit factor</span><span>${_fmtPF(b)}</span></div>
       </div>
+      ${trigBlock}
     </div>
   `;
 }
@@ -930,11 +955,18 @@ async function loadStrategyCompare() {
   const empty = { n: 0, w: 0, l: 0, wr: 0, net_pnl: 0, mean_ask: 0, profit_factor: null };
   const core = data.expiry_convergence || empty;
   const early = data.early_entry || empty;
-  if (!core.n && !early.n) {
+  // Scalp bucket carries .triggers (always present from the server, zeros if
+  // no scalp trades yet). Spread an empty triggers obj if the server somehow
+  // omitted it (pre-deploy ordering edge case).
+  const scalp = data.scalp_exit || { ...empty, triggers: {} };
+  if (!scalp.triggers) scalp.triggers = {};
+  if (!core.n && !early.n && !scalp.n) {
     el.innerHTML = '<div class="text-dim">no resolved trades yet</div>';
     return;
   }
-  el.innerHTML = _strategyCol(core, 'CORE', 'col-core') + _strategyCol(early, 'EARLY', 'col-early');
+  el.innerHTML = _strategyCol(core, 'CORE', 'col-core')
+               + _strategyCol(early, 'EARLY', 'col-early')
+               + _strategyCol(scalp, 'SCALP', 'col-scalp');
 }
 
 // ─── Trades: filter + sort + paginate + drill-down ─────────

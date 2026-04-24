@@ -465,6 +465,26 @@ async def trades(
     return rows
 
 
+_SCALP_TRIGGER_BUCKETS = ("take_profit", "stop_loss", "time_exit", "resolution", "other")
+
+
+def _bucket_trigger(raw: Optional[str]) -> str:
+    """Normalise a free-form exit_trigger string to one of five buckets.
+    Forgiving so the bot can send 'TP', 'tp', 'take_profit' interchangeably."""
+    if not raw:
+        return "other"
+    s = str(raw).strip().lower()
+    if s in ("tp", "take_profit", "takeprofit", "take-profit"):
+        return "take_profit"
+    if s in ("sl", "stop_loss", "stoploss", "stop-loss"):
+        return "stop_loss"
+    if s in ("time", "time_exit", "timeexit", "time-exit"):
+        return "time_exit"
+    if s in ("res", "resolution", "expiry", "expir", "expired"):
+        return "resolution"
+    return "other"
+
+
 @app.get("/api/strategy_compare")
 async def strategy_compare(polybot_session: Optional[str] = Cookie(None)):
     """Per-strategy aggregate (n, W/L, net PNL, mean ask, profit factor).
@@ -473,31 +493,54 @@ async def strategy_compare(polybot_session: Optional[str] = Cookie(None)):
     sending two extra floats and keeps the math co-located with the
     display). Open trades are excluded - resolved rows only, matching
     the rest of the dashboard's WR/PNL math.
+
+    For scalp_exit, additionally returns a 'triggers' dict counting how
+    many resolved scalp trades exited via take_profit / stop_loss /
+    time_exit / resolution / other. Frontend renders this as a single
+    extra row inside the SCALP column.
     """
     sess = require_session(polybot_session)
     uid = sess["user_id"]
+    # Try with exit_trigger first; fall back to without it (pre-scalp-migration),
+    # then to without strategy_label (pre-strategy-split).
     try:
         rows = db().select(
             "trades",
-            columns="outcome,pnl,entry_price,strategy_label",
+            columns="outcome,pnl,entry_price,strategy_label,exit_trigger",
             filters={"user_id": f"eq.{uid}"},
             limit=10000,
         )
     except Exception:
-        # Pre-migration DB: no strategy_label column. Treat every row as core.
-        rows = db().select(
-            "trades",
-            columns="outcome,pnl,entry_price",
-            filters={"user_id": f"eq.{uid}"},
-            limit=10000,
-        )
-        for r in rows:
-            r["strategy_label"] = "expiry_convergence"
+        try:
+            rows = db().select(
+                "trades",
+                columns="outcome,pnl,entry_price,strategy_label",
+                filters={"user_id": f"eq.{uid}"},
+                limit=10000,
+            )
+            for r in rows:
+                r["exit_trigger"] = None
+        except Exception:
+            # Pre-strategy-split DB: no strategy_label column. Treat as all core.
+            rows = db().select(
+                "trades",
+                columns="outcome,pnl,entry_price",
+                filters={"user_id": f"eq.{uid}"},
+                limit=10000,
+            )
+            for r in rows:
+                r["strategy_label"] = "expiry_convergence"
+                r["exit_trigger"] = None
 
     def _empty() -> Dict:
         return {"n": 0, "w": 0, "l": 0, "net": 0.0, "asks": [], "wins_pnl": 0.0, "loss_pnl": 0.0}
 
-    agg = {"expiry_convergence": _empty(), "early_entry": _empty()}
+    agg = {
+        "expiry_convergence": _empty(),
+        "early_entry": _empty(),
+        "scalp_exit": _empty(),
+    }
+    scalp_triggers = {b: 0 for b in _SCALP_TRIGGER_BUCKETS}
     for r in rows:
         oc = r.get("outcome")
         if oc not in ("WIN", "LOSS"):
@@ -523,6 +566,8 @@ async def strategy_compare(polybot_session: Optional[str] = Cookie(None)):
                 b["asks"].append(float(ep))
             except (TypeError, ValueError):
                 pass
+        if label == "scalp_exit":
+            scalp_triggers[_bucket_trigger(r.get("exit_trigger"))] += 1
 
     out: Dict[str, Dict] = {}
     for label, b in agg.items():
@@ -544,6 +589,9 @@ async def strategy_compare(polybot_session: Optional[str] = Cookie(None)):
             "mean_ask": mean_ask,
             "profit_factor": pf,
         }
+    # Scalp-only trigger counts. Always present (zeros if no scalp trades yet)
+    # so the frontend can render the row without conditional null-checks.
+    out["scalp_exit"]["triggers"] = scalp_triggers
     return out
 
 
