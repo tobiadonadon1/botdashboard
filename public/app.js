@@ -870,7 +870,9 @@ function renderAssetRoster(status) {
 let _trades = [];
 let _tradesLimit = 50;
 let _tradesSort = { col: 'timestamp', desc: true };
-let _tradesFilter = { asset: '', dir: '', outcome: '', mode: '', conf: '' };
+// `strategy`: '' = all, 'core' = expiry_convergence (incl legacy NULL),
+// 'early' = early_entry. Filtered client-side like the other dropdowns.
+let _tradesFilter = { asset: '', dir: '', outcome: '', mode: '', strategy: '', conf: '' };
 
 async function loadTrades() {
   const limit = Math.max(_tradesLimit, 50);
@@ -901,6 +903,13 @@ function passFilters(t) {
     const isShadow = t.shadow === true || String(t.mode || '').toLowerCase() === 'shadow';
     if (f.mode === 'live' && isShadow) return false;
     if (f.mode === 'shadow' && !isShadow) return false;
+  }
+  if (f.strategy) {
+    // Legacy rows (no column / null) collapse to 'expiry_convergence' so
+    // 'core only' keeps showing pre-migration data.
+    const s = t.strategy_label || 'expiry_convergence';
+    if (f.strategy === 'core'  && s !== 'expiry_convergence') return false;
+    if (f.strategy === 'early' && s !== 'early_entry') return false;
   }
   if (f.conf) {
     const c = Number(t.confidence || 0);
@@ -985,10 +994,10 @@ function renderTrades() {
 }
 
 function bindTradesUI() {
-  ['flAsset','flDir','flOutcome','flMode','flConf'].forEach(id => {
+  ['flAsset','flDir','flOutcome','flMode','flStrategy','flConf'].forEach(id => {
     const el = $(id); if (!el) return;
     el.addEventListener('change', () => {
-      const key = { flAsset:'asset', flDir:'dir', flOutcome:'outcome', flMode:'mode', flConf:'conf' }[id];
+      const key = { flAsset:'asset', flDir:'dir', flOutcome:'outcome', flMode:'mode', flStrategy:'strategy', flConf:'conf' }[id];
       _tradesFilter[key] = el.value;
       renderTrades();
     });

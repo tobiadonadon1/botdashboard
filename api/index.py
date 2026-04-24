@@ -387,13 +387,17 @@ async def wallet(polybot_session: Optional[str] = Cookie(None)):
 async def trades(
     limit: int = 25,
     shadow: Optional[str] = None,
+    strategy: Optional[str] = None,
     polybot_session: Optional[str] = Cookie(None),
 ):
     """
     Trade list.
-      • shadow=1 | true  → only shadow-mode rows
-      • shadow=0 | false → only live rows (shadow is NULL or false)
-      • omit            → all rows (backwards-compatible)
+      • shadow=1 | true            → only shadow-mode rows
+      • shadow=0 | false           → only live rows (shadow is NULL or false)
+      • strategy=expiry_convergence → core strategy only (NULLs included
+                                       so legacy rows stay visible)
+      • strategy=early_entry        → early strategy only
+      • omit                        → all rows (backwards-compatible)
     """
     sess = require_session(polybot_session)
     filters = {"user_id": f"eq.{sess['user_id']}"}
@@ -403,6 +407,13 @@ async def trades(
         # legacy rows where shadow IS NULL, so pre-migration data stays
         # visible in the live tab.
         filters["shadow"] = "is.true" if want else "not.is.true"
+    if strategy:
+        s_norm = str(strategy).strip().lower()
+        if s_norm == "expiry_convergence":
+            # Include legacy NULL rows in the core view (they default to core).
+            filters["or"] = "(strategy_label.eq.expiry_convergence,strategy_label.is.null)"
+        elif s_norm == "early_entry":
+            filters["strategy_label"] = "eq.early_entry"
     try:
         rows = db().select(
             "trades",
@@ -412,7 +423,10 @@ async def trades(
             limit=int(limit),
         )
     except Exception:
-        # Fallback 1: no strategy_label column yet
+        # Fallback 1: no strategy_label column yet — drop the filter too,
+        # otherwise PostgREST would still 4xx on the missing column.
+        filters.pop("strategy_label", None)
+        filters.pop("or", None)
         try:
             rows = db().select(
                 "trades",
