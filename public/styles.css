@@ -21,6 +21,10 @@
   --amber: #d4aa3c;
   --red: #cc4858;
   --blue: #5ba8c8;
+  /* Single new token for the SCALP strategy. Muted lavender, picked to sit
+     in the same saturation / lightness band as the other accent tokens
+     above so the palette still reads as one family. */
+  --violet: #9b7bd4;
   --text: #c0d4ca;
   --text-dim: #6a8a7c;
   --muted: #3a5248;
@@ -1055,11 +1059,30 @@ body.paper .topbar { border-bottom-color: rgba(212, 170, 60, 0.35); }
   color: var(--amber);
   border: 1px solid rgba(212, 170, 60, 0.50);
 }
+/* SCALP strategy pill — uses the new --violet token. Same alpha shape
+   as badge-early so the three pills (LIVE/SHADOW + EARLY + SCALP) sit
+   in a coherent family on the same row. */
+.badge-scalp {
+  background: rgba(155, 123, 212, 0.16);
+  color: var(--violet);
+  border: 1px solid rgba(155, 123, 212, 0.50);
+}
+/* Trigger annotation under PNL value on scalp_exit rows. Stays subtle
+   so it doesn't compete with the dollar amount above. */
+.exit-trig {
+  display: block;
+  font-size: 0.60rem;
+  letter-spacing: 0.10em;
+  color: var(--text-dim);
+  margin-top: 2px;
+  font-family: var(--mono);
+  text-transform: uppercase;
+}
 
 /* ─── Strategy Comparison Panel ─────────────────────────────── */
 .strategy-compare {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 14px;
 }
 .strategy-col {
@@ -1075,6 +1098,10 @@ body.paper .topbar { border-bottom-color: rgba(212, 170, 60, 0.35); }
   border-color: rgba(212, 170, 60, 0.45);
   background: rgba(212, 170, 60, 0.04);
 }
+.strategy-col.col-scalp {
+  border-color: rgba(155, 123, 212, 0.45);
+  background: rgba(155, 123, 212, 0.04);
+}
 .strategy-col-header {
   font-family: var(--mono);
   font-size: 0.72rem;
@@ -1086,8 +1113,31 @@ body.paper .topbar { border-bottom-color: rgba(212, 170, 60, 0.35); }
   padding-bottom: 8px;
   border-bottom: 1px solid var(--border);
 }
-.strategy-col.col-core .strategy-col-header { color: var(--green); }
+.strategy-col.col-core  .strategy-col-header { color: var(--green); }
 .strategy-col.col-early .strategy-col-header { color: var(--amber); }
+.strategy-col.col-scalp .strategy-col-header { color: var(--violet); }
+/* Scalp-only trigger breakdown row. Sits inside the SCALP column under
+   the 7 standard rows, separated by a thin divider. */
+.strategy-trig-row {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.10em;
+  color: var(--text-dim);
+}
+.strategy-trig-row .trig-label {
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  display: block;
+}
+.strategy-trig-row .trig-vals {
+  color: var(--text);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
 .strategy-rows {
   display: flex;
   flex-direction: column;
@@ -1114,9 +1164,16 @@ body.paper .topbar { border-bottom-color: rgba(212, 170, 60, 0.35); }
 .strategy-row.pnl-pos > span:last-child { color: var(--green-bright); }
 .strategy-row.pnl-neg > span:last-child { color: var(--red); }
 
-/* Mobile: stack CORE and EARLY columns, tighten padding. 700px matches
-   the point where two side-by-side columns start feeling cramped in a
-   col-12 card even before the full-mobile breakpoint. */
+/* Tablet (≤900px): three side-by-side strategy columns get cramped in a
+   col-12 card; drop to two columns and let the third wrap to its own row. */
+@media (max-width: 900px) {
+  .strategy-compare {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+/* Mobile (≤700px): full stack, tighten gap + padding. Keeps the SCALP
+   trigger-breakdown row inside the column when there's only one column
+   wide enough to hold the 'TP X% · SL Y%' text. */
 @media (max-width: 700px) {
   .strategy-compare {
     grid-template-columns: 1fr;
@@ -1124,6 +1181,19 @@ body.paper .topbar { border-bottom-color: rgba(212, 170, 60, 0.35); }
   }
   .strategy-col {
     padding: 12px 14px;
+  }
+}
+/* Phone (≤600px): tighter still, matches the rest of the dashboard's
+   600px breakpoint. */
+@media (max-width: 600px) {
+  .strategy-col {
+    padding: 10px 12px;
+  }
+  .strategy-row {
+    font-size: 0.78rem;
+  }
+  .strategy-trig-row .trig-vals {
+    font-size: 0.68rem;
   }
 }
 

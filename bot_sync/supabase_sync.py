@@ -24,9 +24,15 @@ USAGE on the local bot:
         "entry_price": 0.52, "size_usd": 50.0, "shares": 96.15,
         "confidence": 0.71, "status": "PLACED",
         "end_time": "2026-04-16T14:10:00Z",
-        # Strategy label: "expiry_convergence" (default if omitted) or
-        # "early_entry". Anything else is normalised to expiry_convergence.
-        "strategy_label": "expiry_convergence",
+        # strategy_label: 'expiry_convergence' (default if omitted),
+        # 'early_entry', or 'scalp_exit'. Anything else is normalised to
+        # expiry_convergence.
+        "strategy_label": "scalp_exit",
+        # scalp_exit-only telemetry. Omit / NULL on core + early rows.
+        "exit_trigger": "take_profit",   # 'take_profit' | 'stop_loss' | 'time_exit' | 'resolution'
+        "entry_bid": 0.51,
+        "exit_bid": 0.58,
+        "realized_pnl_partial": 7.0,     # subset of pnl realised via the scalp exit
     })
 
     sync.push_signal({"signal_name": "rsi_oversold", "times_seen": 42,

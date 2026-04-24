@@ -52,7 +52,13 @@ create table if not exists public.trades (
   timeframe      text        default '5m',
   mode           text,        -- 'paper' | 'live' | 'shadow' | null (legacy rows)
   shadow         boolean     default false,  -- true = shadow-mode journal row, never real $
-  strategy_label text        default 'expiry_convergence',  -- 'expiry_convergence' | 'early_entry'
+  strategy_label text        default 'expiry_convergence',  -- 'expiry_convergence' | 'early_entry' | 'scalp_exit'
+  -- scalp_exit-specific telemetry. NULL on the other two strategies. Float4
+  -- (real) precision is fine for sub-cent prediction-market prices + small PNL.
+  exit_trigger          text,    -- 'take_profit' | 'stop_loss' | 'time_exit' | 'resolution' | other
+  entry_bid             real,    -- bid price at entry
+  exit_bid              real,    -- bid price at exit (NULL until resolved)
+  realized_pnl_partial  real,    -- partial PNL realized via early scalp (subset of pnl)
   created_at     timestamptz not null default now(),
   unique (user_id, trade_id)
 );
@@ -61,6 +67,10 @@ create table if not exists public.trades (
 --   alter table public.trades add column if not exists mode text;
 --   alter table public.trades add column if not exists shadow boolean default false;
 --   alter table public.trades add column if not exists strategy_label text default 'expiry_convergence';
+--   alter table public.trades add column if not exists exit_trigger text;
+--   alter table public.trades add column if not exists entry_bid real;
+--   alter table public.trades add column if not exists exit_bid real;
+--   alter table public.trades add column if not exists realized_pnl_partial real;
 --   update public.trades set strategy_label = 'expiry_convergence' where strategy_label is null;
 --   create index if not exists trades_user_shadow_idx on public.trades (user_id, shadow);
 --   create index if not exists trades_user_strategy_idx on public.trades (user_id, strategy_label);

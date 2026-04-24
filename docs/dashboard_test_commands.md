@@ -110,6 +110,133 @@ curl -X POST "$DASHBOARD_URL/api/bot/push" \
 
 Expected dashboard row: `SOL LIVE` (no EARLY pill - defaulted to core).
 
+## 3a. Scalp_exit trades (3 cases: TP, SL, time_exit)
+
+Scalp trades carry four extra fields - `exit_trigger`, `entry_bid`,
+`exit_bid`, `realized_pnl_partial`. The dashboard renders them as a
+purple SCALP pill in Recent Trades, a small grey trigger label under
+the PNL value (TP / SL / TIME / RES), and a third column in the
+Strategy Comparison card.
+
+### TP (take-profit) hit
+
+```bash
+curl -X POST "$DASHBOARD_URL/api/bot/push" \
+  -H "Authorization: Bearer $BOT_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "trade",
+    "data": {
+      "trade_id": "test-scalp-tp-001",
+      "timestamp": "2026-04-24T14:10:00Z",
+      "asset": "BTC",
+      "direction": "UP",
+      "entry_price": 0.51,
+      "size_usd": 50.0,
+      "shares": 98.04,
+      "confidence": 0.68,
+      "status": "CLOSED",
+      "outcome": "WIN",
+      "pnl": 4.5,
+      "resolved_at": "2026-04-24T14:12:30Z",
+      "end_time": "2026-04-24T14:15:00Z",
+      "timeframe": "5m",
+      "strategy_label": "scalp_exit",
+      "exit_trigger": "take_profit",
+      "entry_bid": 0.51,
+      "exit_bid": 0.555,
+      "realized_pnl_partial": 4.5
+    }
+  }'
+```
+
+Expected: `BTC LIVE SCALP` row, PNL `+$4.50` with `TP` underneath.
+
+### SL (stop-loss) hit
+
+```bash
+curl -X POST "$DASHBOARD_URL/api/bot/push" \
+  -H "Authorization: Bearer $BOT_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "trade",
+    "data": {
+      "trade_id": "test-scalp-sl-001",
+      "timestamp": "2026-04-24T14:11:00Z",
+      "asset": "ETH",
+      "direction": "DOWN",
+      "entry_price": 0.49,
+      "size_usd": 40.0,
+      "shares": 81.63,
+      "confidence": 0.61,
+      "status": "CLOSED",
+      "outcome": "LOSS",
+      "pnl": -3.0,
+      "resolved_at": "2026-04-24T14:13:00Z",
+      "end_time": "2026-04-24T14:16:00Z",
+      "timeframe": "5m",
+      "strategy_label": "scalp_exit",
+      "exit_trigger": "stop_loss",
+      "entry_bid": 0.49,
+      "exit_bid": 0.46,
+      "realized_pnl_partial": -3.0
+    }
+  }'
+```
+
+Expected: `ETH LIVE SCALP` row, PNL `-$3.00` with `SL` underneath.
+
+### time_exit (timeout, no TP / SL hit)
+
+```bash
+curl -X POST "$DASHBOARD_URL/api/bot/push" \
+  -H "Authorization: Bearer $BOT_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "type": "trade",
+    "data": {
+      "trade_id": "test-scalp-time-001",
+      "timestamp": "2026-04-24T14:12:00Z",
+      "asset": "SOL",
+      "direction": "UP",
+      "entry_price": 0.53,
+      "size_usd": 35.0,
+      "shares": 66.04,
+      "confidence": 0.59,
+      "status": "CLOSED",
+      "outcome": "WIN",
+      "pnl": 0.7,
+      "resolved_at": "2026-04-24T14:17:00Z",
+      "end_time": "2026-04-24T14:17:00Z",
+      "timeframe": "5m",
+      "strategy_label": "scalp_exit",
+      "exit_trigger": "time_exit",
+      "entry_bid": 0.53,
+      "exit_bid": 0.54,
+      "realized_pnl_partial": 0.7
+    }
+  }'
+```
+
+Expected: `SOL LIVE SCALP` row, PNL `+$0.70` with `TIME` underneath.
+
+### After all three pushes
+
+The Strategy Comparison panel's SCALP column should read:
+
+```
+n             3
+w / l         2 / 1
+wr            66.7%
+wilson 95%    20.8 - 93.9%
+net pnl       +$2.20
+mean ask      $0.510
+profit factor 1.73
+
+EXIT TRIGGERS
+TP 33% · SL 33% · TIME 33%
+```
+
 ## 4. Resolve a trade to populate WR / PNL / Wilson CI
 
 The Strategy Comparison panel only counts resolved trades (WIN/LOSS),

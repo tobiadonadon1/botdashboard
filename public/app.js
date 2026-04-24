@@ -897,11 +897,35 @@ function _fmtWilson(w, n) {
   const [lo, hi] = wilson95(Number(w), Number(n));
   return `${(lo * 100).toFixed(1)}-${(hi * 100).toFixed(1)}%`;
 }
+// Format the SCALP-only trigger breakdown as 'TP 50% · SL 25% · TIME 12% · RES 12%'.
+// Buckets that are 0 are omitted so a fresh strategy doesn't read as four zeros.
+function _fmtTriggers(triggers) {
+  if (!triggers) return '--';
+  const order = [['take_profit', 'TP'], ['stop_loss', 'SL'], ['time_exit', 'TIME'], ['resolution', 'RES'], ['other', 'OTHER']];
+  const total = order.reduce((s, [k]) => s + (Number(triggers[k]) || 0), 0);
+  if (!total) return '--';
+  const parts = [];
+  for (const [k, label] of order) {
+    const c = Number(triggers[k]) || 0;
+    if (!c) continue;
+    parts.push(`${label} ${Math.round((c / total) * 100)}%`);
+  }
+  return parts.join(' · ');
+}
 function _strategyCol(b, label, colClass) {
   const net = Number(b.net_pnl || 0);
   const netCls = net > 0 ? 'pnl-pos' : net < 0 ? 'pnl-neg' : '';
   const wrTxt = b.n ? `${(Number(b.wr) * 100).toFixed(1)}%` : '--';
   const askTxt = b.mean_ask ? `$${Number(b.mean_ask).toFixed(3)}` : '--';
+  // Trigger breakdown is only meaningful for the SCALP column. Server returns
+  // .triggers only on scalp_exit; check for it here so this helper stays
+  // generic for the other two columns.
+  const trigBlock = b.triggers
+    ? `<div class="strategy-trig-row">
+         <span class="trig-label">exit triggers</span>
+         <span class="trig-vals">${_fmtTriggers(b.triggers)}</span>
+       </div>`
+    : '';
   return `
     <div class="strategy-col ${colClass}">
       <div class="strategy-col-header">${label}</div>
@@ -914,6 +938,7 @@ function _strategyCol(b, label, colClass) {
         <div class="strategy-row"><span>mean ask</span><span>${askTxt}</span></div>
         <div class="strategy-row"><span>profit factor</span><span>${_fmtPF(b)}</span></div>
       </div>
+      ${trigBlock}
     </div>
   `;
 }
@@ -930,11 +955,18 @@ async function loadStrategyCompare() {
   const empty = { n: 0, w: 0, l: 0, wr: 0, net_pnl: 0, mean_ask: 0, profit_factor: null };
   const core = data.expiry_convergence || empty;
   const early = data.early_entry || empty;
-  if (!core.n && !early.n) {
+  // Scalp bucket carries .triggers (always present from the server, zeros if
+  // no scalp trades yet). Spread an empty triggers obj if the server somehow
+  // omitted it (pre-deploy ordering edge case).
+  const scalp = data.scalp_exit || { ...empty, triggers: {} };
+  if (!scalp.triggers) scalp.triggers = {};
+  if (!core.n && !early.n && !scalp.n) {
     el.innerHTML = '<div class="text-dim">no resolved trades yet</div>';
     return;
   }
-  el.innerHTML = _strategyCol(core, 'CORE', 'col-core') + _strategyCol(early, 'EARLY', 'col-early');
+  el.innerHTML = _strategyCol(core, 'CORE', 'col-core')
+               + _strategyCol(early, 'EARLY', 'col-early')
+               + _strategyCol(scalp, 'SCALP', 'col-scalp');
 }
 
 // ─── Trades: filter + sort + paginate + drill-down ─────────
@@ -981,6 +1013,7 @@ function passFilters(t) {
     const s = t.strategy_label || 'expiry_convergence';
     if (f.strategy === 'core'  && s !== 'expiry_convergence') return false;
     if (f.strategy === 'early' && s !== 'early_entry') return false;
+    if (f.strategy === 'scalp' && s !== 'scalp_exit') return false;
   }
   if (f.conf) {
     const c = Number(t.confidence || 0);
@@ -1034,13 +1067,26 @@ function renderTrades() {
       : '<span class="mode-badge badge-live">LIVE</span>';
     const conf = Number(t.confidence || 0);
     const cCls = conf >= 0.75 ? 'conf-hi' : conf >= 0.60 ? 'conf-mid' : 'conf-lo';
-    // Strategy pill: only render for early_entry. expiry_convergence (the
-    // majority / default) stays unbadged to keep the table calm — the EARLY
-    // pill pops exactly because it's the only strategy label visible.
+    // Strategy pill: render only for early_entry / scalp_exit.
+    // expiry_convergence (the majority / default) stays unbadged so the
+    // active-strategy rows pop visually.
     const strat = t.strategy_label || 'expiry_convergence';
-    const stratBadge = strat === 'early_entry'
-      ? '<span class="mode-badge badge-early" aria-label="early entry strategy">EARLY</span>'
-      : '';
+    let stratBadge = '';
+    if (strat === 'early_entry') {
+      stratBadge = '<span class="mode-badge badge-early" aria-label="early entry strategy">EARLY</span>';
+    } else if (strat === 'scalp_exit') {
+      stratBadge = '<span class="mode-badge badge-scalp" aria-label="scalp exit strategy">SCALP</span>';
+    }
+    // Exit-trigger annotation under PNL value, scalp_exit only. Compact
+    // mapping so the cell stays narrow; unknown values display upper-cased
+    // (truncated) so a new bot-side trigger never breaks the layout.
+    let trigLine = '';
+    if (strat === 'scalp_exit' && t.exit_trigger) {
+      const trigMap = { take_profit: 'TP', stop_loss: 'SL', time_exit: 'TIME', resolution: 'RES' };
+      const k = String(t.exit_trigger).toLowerCase();
+      const trigTxt = trigMap[k] || k.toUpperCase().slice(0, 6);
+      trigLine = `<span class="exit-trig" aria-label="exit trigger ${k}">${trigTxt}</span>`;
+    }
     const tr = document.createElement('tr');
     tr.dataset.tradeId = t.trade_id;
     tr.innerHTML = `
@@ -1053,7 +1099,7 @@ function renderTrades() {
       <td class="td-num ${cCls}">${Math.round(conf * 100)}%</td>
       <td class="text-dim">${t.status || '--'}</td>
       <td class="${ocls}">${outcome}</td>
-      <td class="td-num ${pnlCls}">${fmtUsd(pnl)}</td>`;
+      <td class="td-num ${pnlCls}">${fmtUsd(pnl)}${trigLine}</td>`;
     tr.addEventListener('click', () => openTradeModal(t));
     body.appendChild(tr);
   });
