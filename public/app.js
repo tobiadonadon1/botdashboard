@@ -981,6 +981,7 @@ function passFilters(t) {
     const s = t.strategy_label || 'expiry_convergence';
     if (f.strategy === 'core'  && s !== 'expiry_convergence') return false;
     if (f.strategy === 'early' && s !== 'early_entry') return false;
+    if (f.strategy === 'scalp' && s !== 'scalp_exit') return false;
   }
   if (f.conf) {
     const c = Number(t.confidence || 0);
