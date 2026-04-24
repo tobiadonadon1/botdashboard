@@ -406,31 +406,45 @@ async def trades(
     try:
         rows = db().select(
             "trades",
-            columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode,shadow",
+            columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode,shadow,strategy_label",
             filters=filters,
             order="timestamp.desc",
             limit=int(limit),
         )
     except Exception:
-        # Fallback 1: no shadow column yet
-        filters.pop("shadow", None)
+        # Fallback 1: no strategy_label column yet
         try:
             rows = db().select(
                 "trades",
-                columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode",
+                columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode,shadow",
                 filters=filters,
                 order="timestamp.desc",
                 limit=int(limit),
             )
         except Exception:
-            rows = db().select(
-                "trades",
-                columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time",
-                filters=filters,
-                order="timestamp.desc",
-                limit=int(limit),
-            )
+            # Fallback 2: no shadow column yet
+            filters.pop("shadow", None)
+            try:
+                rows = db().select(
+                    "trades",
+                    columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode",
+                    filters=filters,
+                    order="timestamp.desc",
+                    limit=int(limit),
+                )
+            except Exception:
+                rows = db().select(
+                    "trades",
+                    columns="trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time",
+                    filters=filters,
+                    order="timestamp.desc",
+                    limit=int(limit),
+                )
     for r in rows:
+        # Backfill: legacy rows without strategy_label default to core
+        # (expiry_convergence) so the dashboard renders consistently.
+        if not r.get("strategy_label"):
+            r["strategy_label"] = "expiry_convergence"
         tf = "5m"
         if r.get("timestamp") and r.get("end_time"):
             try:
@@ -676,6 +690,13 @@ async def bot_push(
         for r in rows:
             if not r.get("trade_id"):
                 raise HTTPException(status_code=400, detail="trade.data.trade_id required")
+            # Strategy label: only two values allowed, anything else (including
+            # null/missing) falls back to expiry_convergence. Keeps older bot
+            # builds (pre-strategy-split) compatible with the new schema.
+            raw_strat = r.get("strategy_label")
+            strat = str(raw_strat).strip() if raw_strat else "expiry_convergence"
+            if strat not in ("expiry_convergence", "early_entry"):
+                strat = "expiry_convergence"
             payload.append({
                 "user_id": uid,
                 "trade_id": str(r["trade_id"]),
@@ -694,24 +715,31 @@ async def bot_push(
                 "timeframe": r.get("timeframe", "5m"),
                 "mode": r.get("mode"),
                 "shadow": bool(r.get("shadow", False)),
+                "strategy_label": strat,
             })
         try:
             s.upsert("trades", payload, on_conflict="user_id,trade_id")
         except Exception:
-            # Retry without optional cols if schema hasn't been migrated yet.
+            # Cascading retry — drop newest optional column first, fall back to
+            # progressively older shapes if the DB hasn't been migrated yet.
             for p in payload:
-                p.pop("shadow", None)
+                p.pop("strategy_label", None)
             try:
                 s.upsert("trades", payload, on_conflict="user_id,trade_id")
             except Exception:
                 for p in payload:
-                    p.pop("mode", None)
+                    p.pop("shadow", None)
                 try:
                     s.upsert("trades", payload, on_conflict="user_id,trade_id")
                 except Exception:
                     for p in payload:
-                        p.pop("timeframe", None)
-                    s.upsert("trades", payload, on_conflict="user_id,trade_id")
+                        p.pop("mode", None)
+                    try:
+                        s.upsert("trades", payload, on_conflict="user_id,trade_id")
+                    except Exception:
+                        for p in payload:
+                            p.pop("timeframe", None)
+                        s.upsert("trades", payload, on_conflict="user_id,trade_id")
         return {"ok": True, "type": "trade", "count": len(payload)}
 
     if kind == "signal":

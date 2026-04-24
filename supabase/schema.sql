@@ -52,6 +52,7 @@ create table if not exists public.trades (
   timeframe      text        default '5m',
   mode           text,        -- 'paper' | 'live' | 'shadow' | null (legacy rows)
   shadow         boolean     default false,  -- true = shadow-mode journal row, never real $
+  strategy_label text        default 'expiry_convergence',  -- 'expiry_convergence' | 'early_entry'
   created_at     timestamptz not null default now(),
   unique (user_id, trade_id)
 );
@@ -59,7 +60,10 @@ create table if not exists public.trades (
 -- If upgrading an existing table:
 --   alter table public.trades add column if not exists mode text;
 --   alter table public.trades add column if not exists shadow boolean default false;
+--   alter table public.trades add column if not exists strategy_label text default 'expiry_convergence';
+--   update public.trades set strategy_label = 'expiry_convergence' where strategy_label is null;
 --   create index if not exists trades_user_shadow_idx on public.trades (user_id, shadow);
+--   create index if not exists trades_user_strategy_idx on public.trades (user_id, strategy_label);
 
 create index if not exists trades_user_ts_idx
   on public.trades (user_id, timestamp desc);
@@ -69,6 +73,8 @@ create index if not exists trades_user_asset_idx
   on public.trades (user_id, asset);
 create index if not exists trades_user_shadow_idx
   on public.trades (user_id, shadow);
+create index if not exists trades_user_strategy_idx
+  on public.trades (user_id, strategy_label);
 
 -- ─────────────────────────────────────────────────────────────────
 -- SIGNAL PERFORMANCE — per-user learning state

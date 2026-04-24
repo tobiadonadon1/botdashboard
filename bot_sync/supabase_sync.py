@@ -24,6 +24,9 @@ USAGE on the local bot:
         "entry_price": 0.52, "size_usd": 50.0, "shares": 96.15,
         "confidence": 0.71, "status": "PLACED",
         "end_time": "2026-04-16T14:10:00Z",
+        # Strategy label: "expiry_convergence" (default if omitted) or
+        # "early_entry". Anything else is normalised to expiry_convergence.
+        "strategy_label": "expiry_convergence",
     })
 
     sync.push_signal({"signal_name": "rsi_oversold", "times_seen": 42,

@@ -66,6 +66,9 @@ class PolyMarketBot:
             "confidence": trade.confidence,
             "status": "PLACED",
             "end_time": trade.end_time.isoformat(),
+            # "expiry_convergence" (default if omitted) or "early_entry".
+            # Drives the dashboard's CORE / EARLY split panel + EARLY pill.
+            "strategy_label": trade.strategy_label,
         })
 
     def on_trade_resolved(self, trade, outcome: str, pnl: float):
