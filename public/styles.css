@@ -21,6 +21,10 @@
   --amber: #d4aa3c;
   --red: #cc4858;
   --blue: #5ba8c8;
+  /* Single new token for the SCALP strategy. Muted lavender, picked to sit
+     in the same saturation / lightness band as the other accent tokens
+     above so the palette still reads as one family. */
+  --violet: #9b7bd4;
   --text: #c0d4ca;
   --text-dim: #6a8a7c;
   --muted: #3a5248;
@@ -1054,6 +1058,25 @@ body.paper .topbar { border-bottom-color: rgba(212, 170, 60, 0.35); }
   background: rgba(212, 170, 60, 0.16);
   color: var(--amber);
   border: 1px solid rgba(212, 170, 60, 0.50);
+}
+/* SCALP strategy pill — uses the new --violet token. Same alpha shape
+   as badge-early so the three pills (LIVE/SHADOW + EARLY + SCALP) sit
+   in a coherent family on the same row. */
+.badge-scalp {
+  background: rgba(155, 123, 212, 0.16);
+  color: var(--violet);
+  border: 1px solid rgba(155, 123, 212, 0.50);
+}
+/* Trigger annotation under PNL value on scalp_exit rows. Stays subtle
+   so it doesn't compete with the dollar amount above. */
+.exit-trig {
+  display: block;
+  font-size: 0.60rem;
+  letter-spacing: 0.10em;
+  color: var(--text-dim);
+  margin-top: 2px;
+  font-family: var(--mono);
+  text-transform: uppercase;
 }
 
 /* ─── Strategy Comparison Panel ─────────────────────────────── */
