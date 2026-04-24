@@ -1050,10 +1050,18 @@ body.paper .topbar { border-bottom-color: rgba(212, 170, 60, 0.35); }
   color: var(--blue);
   border: 1px solid rgba(91, 168, 200, 0.45);
 }
+/* CORE strategy pill — muted green so every row carries a strategy
+   badge without competing visually with the brighter LIVE pill that
+   sits next to it. Uses --green-dim (already in the palette) and
+   lower alpha than the active-strategy pills. */
+.badge-core {
+  background: rgba(88, 181, 128, 0.08);
+  color: var(--green-dim);
+  border: 1px solid rgba(88, 181, 128, 0.32);
+}
 /* EARLY strategy pill — re-uses the existing --amber warning/accent
    token (same as the PAUSE button + daily-cap 'warm' state). No new
-   color introduced. Shown only for early_entry rows; expiry_convergence
-   stays unbadged to keep the core (majority) trade rows visually quiet. */
+   color introduced. */
 .badge-early {
   background: rgba(212, 170, 60, 0.16);
   color: var(--amber);

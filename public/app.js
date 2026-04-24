@@ -1075,15 +1075,17 @@ function renderTrades() {
     const conf = hasConf ? Number(confRaw) : 0;
     const cCls = !hasConf ? 'text-dim' : conf >= 0.75 ? 'conf-hi' : conf >= 0.60 ? 'conf-mid' : 'conf-lo';
     const confDisp = hasConf ? `${Math.round(conf * 100)}%` : '--';
-    // Strategy pill: render only for early_entry / scalp_exit.
-    // expiry_convergence (the majority / default) stays unbadged so the
-    // active-strategy rows pop visually.
+    // Strategy pill: every row carries one. CORE is the muted default,
+    // EARLY (amber) and SCALP (violet) pop against it. Legacy rows with
+    // null strategy_label collapse to CORE.
     const strat = t.strategy_label || 'expiry_convergence';
     let stratBadge = '';
     if (strat === 'early_entry') {
       stratBadge = '<span class="mode-badge badge-early" aria-label="early entry strategy">EARLY</span>';
     } else if (strat === 'scalp_exit') {
       stratBadge = '<span class="mode-badge badge-scalp" aria-label="scalp exit strategy">SCALP</span>';
+    } else {
+      stratBadge = '<span class="mode-badge badge-core" aria-label="core (expiry convergence) strategy">CORE</span>';
     }
     // Exit-trigger annotation under PNL value, scalp_exit only. Compact
     // mapping so the cell stays narrow; unknown values display upper-cased
