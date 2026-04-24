@@ -1155,6 +1155,33 @@ body.paper .topbar { border-bottom-color: rgba(212, 170, 60, 0.35); }
 .strategy-row.pnl-pos > span:last-child { color: var(--green-bright); }
 .strategy-row.pnl-neg > span:last-child { color: var(--red); }
 
+/* Mobile: stack CORE and EARLY columns, tighten padding. 700px matches
+   the point where two side-by-side columns start feeling cramped in a
+   col-12 card even before the full-mobile breakpoint. */
+@media (max-width: 700px) {
+  .strategy-compare {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .strategy-col {
+    padding: 12px 14px;
+  }
+}
+
+/* Trades-filter row stays readable on narrow screens - already flex-wrap
+   above; this just tightens spacing so the 'strategy' label and the
+   dropdown don't share a cramped line with any future filters. */
+@media (max-width: 600px) {
+  .trades-filters {
+    gap: 8px;
+    padding-bottom: 10px;
+  }
+  .filter-select {
+    padding: 5px 22px 5px 8px;
+    font-size: 0.7rem;
+  }
+}
+
 /* ─── Kill-switch rails grid ────────────────────────────────── */
 .rails-grid {
   display: grid;
