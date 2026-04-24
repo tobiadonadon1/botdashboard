@@ -954,11 +954,18 @@ function renderTrades() {
       : '<span class="mode-badge badge-live">LIVE</span>';
     const conf = Number(t.confidence || 0);
     const cCls = conf >= 0.75 ? 'conf-hi' : conf >= 0.60 ? 'conf-mid' : 'conf-lo';
+    // Strategy pill: only render for early_entry. expiry_convergence (the
+    // majority / default) stays unbadged to keep the table calm — the EARLY
+    // pill pops exactly because it's the only strategy label visible.
+    const strat = t.strategy_label || 'expiry_convergence';
+    const stratBadge = strat === 'early_entry'
+      ? '<span class="mode-badge badge-early" aria-label="early entry strategy">EARLY</span>'
+      : '';
     const tr = document.createElement('tr');
     tr.dataset.tradeId = t.trade_id;
     tr.innerHTML = `
       <td class="text-dim">${fmtLocalTime(t.timestamp)}</td>
-      <td>${t.asset || '--'} ${modeBadge}</td>
+      <td>${t.asset || '--'} ${modeBadge}${stratBadge}</td>
       <td class="text-dim">${tf}</td>
       <td class="${dcls}">${dir}</td>
       <td class="td-num">$${Number(t.entry_price || 0).toFixed(3)}</td>
