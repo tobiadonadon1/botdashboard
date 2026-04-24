@@ -1065,8 +1065,16 @@ function renderTrades() {
     const modeBadge = isShadow
       ? '<span class="mode-badge badge-shadow">SHADOW</span>'
       : '<span class="mode-badge badge-live">LIVE</span>';
-    const conf = Number(t.confidence || 0);
-    const cCls = conf >= 0.75 ? 'conf-hi' : conf >= 0.60 ? 'conf-mid' : 'conf-lo';
+    // Treat null AND 0 as 'no confidence reported': the bot pushes a separate
+    // 'exit-*' resolution row with confidence omitted (stored as 0.0), and a
+    // truly-zero model confidence on a placed trade is impossible by construction.
+    // Renders '--' (matches the rest of the dashboard's missing-value glyph)
+    // instead of a misleading '0%'.
+    const confRaw = t.confidence;
+    const hasConf = confRaw != null && Number(confRaw) > 0;
+    const conf = hasConf ? Number(confRaw) : 0;
+    const cCls = !hasConf ? 'text-dim' : conf >= 0.75 ? 'conf-hi' : conf >= 0.60 ? 'conf-mid' : 'conf-lo';
+    const confDisp = hasConf ? `${Math.round(conf * 100)}%` : '--';
     // Strategy pill: render only for early_entry / scalp_exit.
     // expiry_convergence (the majority / default) stays unbadged so the
     // active-strategy rows pop visually.
@@ -1096,7 +1104,7 @@ function renderTrades() {
       <td class="${dcls}">${dir}</td>
       <td class="td-num">$${Number(t.entry_price || 0).toFixed(3)}</td>
       <td class="td-num">$${Number(t.size_usd || 0).toFixed(2)}</td>
-      <td class="td-num ${cCls}">${Math.round(conf * 100)}%</td>
+      <td class="td-num ${cCls}">${confDisp}</td>
       <td class="text-dim">${t.status || '--'}</td>
       <td class="${ocls}">${outcome}</td>
       <td class="td-num ${pnlCls}">${fmtUsd(pnl)}${trigLine}</td>`;
