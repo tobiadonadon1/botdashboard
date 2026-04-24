@@ -866,11 +866,84 @@ function renderAssetRoster(status) {
   `).join('');
 }
 
+// ─── Strategy Comparison (CORE vs EARLY) ────────────────────────
+// Wilson 95% CI — standard score interval. Much better than the naive
+// sqrt(p*(1-p)/n) at small n and near 0/1, which is exactly the regime
+// a brand-new early_entry strategy will spend most of its first week in.
+function wilson95(w, n) {
+  if (n <= 0) return [0, 0];
+  const z = 1.96;
+  const p = w / n;
+  const denom = 1 + (z * z) / n;
+  const center = p + (z * z) / (2 * n);
+  const margin = z * Math.sqrt((p * (1 - p) / n) + (z * z) / (4 * n * n));
+  const lo = (center - margin) / denom;
+  const hi = (center + margin) / denom;
+  // Clamp to [0, 1] - numerical drift at the 0/n and n/n edges can produce
+  // values like -1e-17 or 1.0000000001 that would render as '-0.0%' / '100.0%'.
+  return [Math.max(0, lo), Math.min(1, hi)];
+}
+
+function _fmtPF(b) {
+  if (b.profit_factor != null) return Number(b.profit_factor).toFixed(2);
+  // Server returns null for 'no losses' — the client disambiguates using
+  // the W/L counts so a strategy with wins and zero losses reads as ∞
+  // rather than the same '--' we use for 'no data at all'.
+  if (Number(b.l) === 0 && Number(b.w) > 0) return '∞';
+  return '--';
+}
+function _fmtWilson(w, n) {
+  if (!n) return '--';
+  const [lo, hi] = wilson95(Number(w), Number(n));
+  return `${(lo * 100).toFixed(1)}-${(hi * 100).toFixed(1)}%`;
+}
+function _strategyCol(b, label, colClass) {
+  const net = Number(b.net_pnl || 0);
+  const netCls = net > 0 ? 'pnl-pos' : net < 0 ? 'pnl-neg' : '';
+  const wrTxt = b.n ? `${(Number(b.wr) * 100).toFixed(1)}%` : '--';
+  const askTxt = b.mean_ask ? `$${Number(b.mean_ask).toFixed(3)}` : '--';
+  return `
+    <div class="strategy-col ${colClass}">
+      <div class="strategy-col-header">${label}</div>
+      <div class="strategy-rows">
+        <div class="strategy-row"><span>n</span><span>${b.n}</span></div>
+        <div class="strategy-row"><span>w / l</span><span>${b.w} / ${b.l}</span></div>
+        <div class="strategy-row"><span>wr</span><span>${wrTxt}</span></div>
+        <div class="strategy-row"><span>wilson 95%</span><span>${_fmtWilson(b.w, b.n)}</span></div>
+        <div class="strategy-row ${netCls}"><span>net pnl</span><span>${fmtUsd(net)}</span></div>
+        <div class="strategy-row"><span>mean ask</span><span>${askTxt}</span></div>
+        <div class="strategy-row"><span>profit factor</span><span>${_fmtPF(b)}</span></div>
+      </div>
+    </div>
+  `;
+}
+async function loadStrategyCompare() {
+  const el = $('strategyCompare');
+  if (!el) return;
+  let data;
+  try {
+    data = await api('/api/strategy_compare');
+  } catch (e) {
+    if (e.message !== 'unauth') console.warn('strategy_compare err', e);
+    return;
+  }
+  const empty = { n: 0, w: 0, l: 0, wr: 0, net_pnl: 0, mean_ask: 0, profit_factor: null };
+  const core = data.expiry_convergence || empty;
+  const early = data.early_entry || empty;
+  if (!core.n && !early.n) {
+    el.innerHTML = '<div class="text-dim">no resolved trades yet</div>';
+    return;
+  }
+  el.innerHTML = _strategyCol(core, 'CORE', 'col-core') + _strategyCol(early, 'EARLY', 'col-early');
+}
+
 // ─── Trades: filter + sort + paginate + drill-down ─────────
 let _trades = [];
 let _tradesLimit = 50;
 let _tradesSort = { col: 'timestamp', desc: true };
-let _tradesFilter = { asset: '', dir: '', outcome: '', mode: '', conf: '' };
+// `strategy`: '' = all, 'core' = expiry_convergence (incl legacy NULL),
+// 'early' = early_entry. Filtered client-side like the other dropdowns.
+let _tradesFilter = { asset: '', dir: '', outcome: '', mode: '', strategy: '', conf: '' };
 
 async function loadTrades() {
   const limit = Math.max(_tradesLimit, 50);
@@ -901,6 +974,13 @@ function passFilters(t) {
     const isShadow = t.shadow === true || String(t.mode || '').toLowerCase() === 'shadow';
     if (f.mode === 'live' && isShadow) return false;
     if (f.mode === 'shadow' && !isShadow) return false;
+  }
+  if (f.strategy) {
+    // Legacy rows (no column / null) collapse to 'expiry_convergence' so
+    // 'core only' keeps showing pre-migration data.
+    const s = t.strategy_label || 'expiry_convergence';
+    if (f.strategy === 'core'  && s !== 'expiry_convergence') return false;
+    if (f.strategy === 'early' && s !== 'early_entry') return false;
   }
   if (f.conf) {
     const c = Number(t.confidence || 0);
@@ -954,11 +1034,18 @@ function renderTrades() {
       : '<span class="mode-badge badge-live">LIVE</span>';
     const conf = Number(t.confidence || 0);
     const cCls = conf >= 0.75 ? 'conf-hi' : conf >= 0.60 ? 'conf-mid' : 'conf-lo';
+    // Strategy pill: only render for early_entry. expiry_convergence (the
+    // majority / default) stays unbadged to keep the table calm — the EARLY
+    // pill pops exactly because it's the only strategy label visible.
+    const strat = t.strategy_label || 'expiry_convergence';
+    const stratBadge = strat === 'early_entry'
+      ? '<span class="mode-badge badge-early" aria-label="early entry strategy">EARLY</span>'
+      : '';
     const tr = document.createElement('tr');
     tr.dataset.tradeId = t.trade_id;
     tr.innerHTML = `
       <td class="text-dim">${fmtLocalTime(t.timestamp)}</td>
-      <td>${t.asset || '--'} ${modeBadge}</td>
+      <td>${t.asset || '--'} ${modeBadge}${stratBadge}</td>
       <td class="text-dim">${tf}</td>
       <td class="${dcls}">${dir}</td>
       <td class="td-num">$${Number(t.entry_price || 0).toFixed(3)}</td>
@@ -978,10 +1065,10 @@ function renderTrades() {
 }
 
 function bindTradesUI() {
-  ['flAsset','flDir','flOutcome','flMode','flConf'].forEach(id => {
+  ['flAsset','flDir','flOutcome','flMode','flStrategy','flConf'].forEach(id => {
     const el = $(id); if (!el) return;
     el.addEventListener('change', () => {
-      const key = { flAsset:'asset', flDir:'dir', flOutcome:'outcome', flMode:'mode', flConf:'conf' }[id];
+      const key = { flAsset:'asset', flDir:'dir', flOutcome:'outcome', flMode:'mode', flStrategy:'strategy', flConf:'conf' }[id];
       _tradesFilter[key] = el.value;
       renderTrades();
     });
@@ -1421,6 +1508,7 @@ async function refreshAll() {
       loadTrades(),
       loadPnlChart(),
       loadLiveVsShadow(),
+      loadStrategyCompare(),
     ]);
     renderSlippage();
     if (document.body.classList.contains('mode-expert')) renderClaudeConsole();
