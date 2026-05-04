@@ -2191,3 +2191,74 @@ th.sort-desc::after { content: '▼'; opacity: 0.8; color: var(--green-bright); 
   background: rgba(204, 72, 88, 0.30);
   box-shadow: 0 0 12px rgba(204, 72, 88, 0.30);
 }
+
+/* --- Copy pane content (per-wallet table + activity feed) --- */
+.copy-section { margin-top: 18px; }
+.copy-section:first-child { margin-top: 0; }
+.copy-section-title {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 0 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.copy-wallet-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+.copy-wallet-table th {
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 0.60rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  font-weight: 500;
+}
+.copy-wallet-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid rgba(78, 148, 108, 0.04);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.copy-wallet-table tr:hover td { background: rgba(78, 148, 108, 0.03); }
+.copy-wallet-table .pnl-pos { color: var(--green-bright); }
+.copy-wallet-table .pnl-neg { color: var(--red); }
+.copy-wallet-table .mode-paused { color: var(--amber); }
+.copy-wallet-table .mode-active { color: var(--green-dim); }
+.copy-wallet-table .wallet-label { font-weight: 500; }
+.copy-wallet-table .wallet-addr {
+  font-size: 0.62rem;
+  color: var(--muted);
+  margin-left: 6px;
+  letter-spacing: 0.04em;
+}
+
+.copy-activity {
+  list-style: none;
+  margin: 0; padding: 0;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+}
+.copy-activity li {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(78, 148, 108, 0.04);
+  color: var(--text);
+  align-items: baseline;
+}
+.copy-activity li:last-child { border-bottom: none; }
+.copy-activity .ca-time { color: var(--text-dim); font-size: 0.66rem; }
+.copy-activity .ca-msg { color: var(--text); }
+.copy-activity .ca-pnl { font-variant-numeric: tabular-nums; text-align: right; }
+.copy-activity .ca-pnl.pos { color: var(--green-bright); }
+.copy-activity .ca-pnl.neg { color: var(--red); }
+.copy-activity .ca-pnl.dim { color: var(--text-dim); }

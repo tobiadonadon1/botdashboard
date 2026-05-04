@@ -153,12 +153,36 @@
       </div>
     </header>
     <div class="pane-body" id="paneCopyBody">
-      <!-- Per-wallet table + activity feed render here in commit 6.
-           Empty state shown for tenants with no copy-bot data. -->
+      <!-- Empty state for tenants with no copy-bot data -->
       <div class="pane-empty" id="copyEmpty">
         <div class="pane-empty-title">no copy bot configured</div>
         <div class="pane-empty-sub">push trades with bot_type=copy to populate this pane</div>
       </div>
+
+      <!-- Per-wallet table -->
+      <section class="copy-section" id="copyWalletsSection" style="display:none;">
+        <h3 class="copy-section-title">wallets</h3>
+        <table class="copy-wallet-table" id="copyWalletTable">
+          <thead>
+            <tr>
+              <th>label</th>
+              <th>mode</th>
+              <th class="td-num">trades</th>
+              <th class="td-num">wr</th>
+              <th class="td-num">pnl</th>
+            </tr>
+          </thead>
+          <tbody><tr><td colspan="5" class="text-dim">loading...</td></tr></tbody>
+        </table>
+      </section>
+
+      <!-- Recent activity feed -->
+      <section class="copy-section" id="copyActivitySection" style="display:none;">
+        <h3 class="copy-section-title">recent activity</h3>
+        <ul class="copy-activity" id="copyActivity">
+          <li class="text-dim">loading...</li>
+        </ul>
+      </section>
     </div>
   </aside>
 

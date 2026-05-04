@@ -1629,6 +1629,79 @@ function _writePaneMeta(prefix, b) {
   if (wopen) wopen.textContent = cfg ? String(b.open_positions || 0) : '--';
 }
 
+// ─── Copy-bot pane: per-wallet table + activity feed ─────
+async function loadCopyWallets() {
+  let data;
+  try { data = await api('/api/copy_wallets'); }
+  catch (e) { if (e.message !== 'unauth') console.warn('copy_wallets err', e); return; }
+
+  const section = $('copyWalletsSection');
+  const tbody = $('copyWalletTable')?.querySelector('tbody');
+  const activeMeta = $('copyActiveWallets');
+  if (!section || !tbody) return;
+
+  if (!data.configured || !data.wallets || !data.wallets.length) {
+    section.style.display = 'none';
+    if (activeMeta) activeMeta.textContent = '0/10';
+    return;
+  }
+  section.style.display = '';
+  if (activeMeta) activeMeta.textContent = `${Number(data.active_wallets || 0)}/10`;
+
+  tbody.innerHTML = '';
+  data.wallets.forEach(w => {
+    const tr = document.createElement('tr');
+    const pnl = Number(w.pnl || 0);
+    const pnlCls = pnl > 0 ? 'pnl-pos' : pnl < 0 ? 'pnl-neg' : '';
+    const wr = Number(w.win_rate || 0);
+    const resolved = (Number(w.wins || 0) + Number(w.losses || 0));
+    const wrTxt = resolved ? `${(wr * 100).toFixed(0)}%` : '--';
+    const modeCls = w.mode === 'paused' ? 'mode-paused' : 'mode-active';
+    const label = w.label || '--';
+    const addr = (w.wallet && w.wallet !== label && w.wallet !== '(unknown)') ? `<span class="wallet-addr">${w.wallet.slice(0, 8)}…</span>` : '';
+    tr.innerHTML = `
+      <td class="wallet-label">${label}${addr}</td>
+      <td class="${modeCls}">${(w.mode || 'active').toUpperCase()}</td>
+      <td class="td-num">${w.trades || 0}</td>
+      <td class="td-num">${wrTxt}</td>
+      <td class="td-num ${pnlCls}">${fmtUsd(pnl)}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+async function loadCopyActivity() {
+  let rows;
+  try { rows = await api('/api/trades?bot_type=copy&limit=10'); }
+  catch (e) { if (e.message !== 'unauth') console.warn('copy_activity err', e); return; }
+
+  const section = $('copyActivitySection');
+  const ul = $('copyActivity');
+  if (!section || !ul) return;
+  if (!rows || !rows.length) {
+    section.style.display = 'none';
+    return;
+  }
+  section.style.display = '';
+  ul.innerHTML = '';
+  rows.forEach(t => {
+    const time = fmtLocalTime(t.timestamp);
+    const outcome = t.outcome || 'PENDING';
+    const dir = String(t.direction || '?').toUpperCase();
+    const asset = t.asset || '--';
+    const wallet = (t.source_wallet || '').slice(0, 8) || '?';
+    const msg = `${asset} ${dir} · ${wallet}`;
+    const pnl = Number(t.pnl || 0);
+    const pnlCls = (outcome === 'PENDING') ? 'dim' : pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : 'dim';
+    const pnlTxt = (outcome === 'PENDING') ? 'OPEN' : fmtUsd(pnl);
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <span class="ca-time">${time}</span>
+      <span class="ca-msg">${msg}</span>
+      <span class="ca-pnl ${pnlCls}">${pnlTxt}</span>`;
+    ul.appendChild(li);
+  });
+}
+
 // ─── Refresh loop ────────────────────────────────────────
 async function refreshAll() {
   try {
@@ -1636,6 +1709,8 @@ async function refreshAll() {
     await loadSummary();
     await Promise.all([
       loadCombined(),
+      loadCopyWallets(),
+      loadCopyActivity(),
       loadAssets(),
       loadTimeframes(),
       loadHourly(),
