@@ -1758,6 +1758,30 @@ $('railsToggleBtn')?.addEventListener('click', () => toggleRailsDetail());
 // Brier tooltip popover
 $('brier') && (()=>{}); // legacy id may not exist anymore; tooltip attribute does the work
 
+// HALT ALL — typed-confirm modal posts pause to BOTH bots in one call.
+// Backend POST /api/bot/control accepts bot_type='all' and writes a row
+// per (user, bot_type) inside one upsert pass.
+$('haltAllBtn')?.addEventListener('click', () => {
+  confirmAction({
+    title: 'HALT ALL BOTS',
+    body: 'This pauses <strong>both</strong> the copy bot and the bachelier bot immediately. Each process keeps running but will place no new orders until you press START on each bot. Type <code>CONFIRM</code> to proceed.',
+    onConfirm: async () => {
+      const r = await fetch('/api/bot/control', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: 'pause', bot_type: 'all' }),
+      });
+      if (!r.ok) {
+        let msg = `HTTP ${r.status}`;
+        try { const j = await r.json(); if (j.detail) msg = j.detail; } catch {}
+        throw new Error(msg);
+      }
+      audit('HALT ALL → both bots paused');
+    },
+  });
+});
+
 loadMe().then(() => {
   refreshAll();
   setInterval(refreshAll, POLL_INTERVAL_MS);
