@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -673,6 +673,254 @@ async def strategy_compare(
     # so the frontend can render the row without conditional null-checks.
     out["scalp_exit"]["triggers"] = scalp_triggers
     return out
+
+
+def _parse_iso(s: Optional[str]) -> Optional[datetime]:
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _kill_state_from_status(status: Dict) -> str:
+    """Derive a single severity label from a status payload's killswitches.
+    'red'   = at least one rail FIRED (action != cooldown/cooling)
+    'amber' = at least one rail in COOLING (no fired)
+    'green' = none active
+    """
+    halts = status.get("killswitches") if isinstance(status, dict) else None
+    if not isinstance(halts, list) or not halts:
+        return "green"
+    cooling_only = True
+    for h in halts:
+        if not isinstance(h, dict):
+            continue
+        action = str(h.get("action") or "").lower()
+        if action not in ("cooldown", "cooling"):
+            return "red"
+    return "amber" if cooling_only else "green"
+
+
+def _per_bot_summary(uid: str, bt: str, day_start_utc: datetime) -> Dict:
+    """Compact per-bot rollup for the combined endpoint. Returns the same
+    shape regardless of whether the bot has data, so the frontend can
+    branch on `configured`."""
+    s = db()
+    # Status row.
+    try:
+        status_rows = s.select("bot_status",
+                               filters={"user_id": f"eq.{uid}", "bot_type": f"eq.{bt}"},
+                               limit=1)
+    except Exception:
+        # Pre-migration: only one status row per user, attribute it to bachelier.
+        status_rows = s.select("bot_status", filters={"user_id": f"eq.{uid}"}, limit=1) if bt == "bachelier" else []
+    status = status_rows[0]["status"] if status_rows else {}
+    status_updated_at = status_rows[0]["updated_at"] if status_rows else None
+    age_sec = None
+    if status_updated_at:
+        ts = _parse_iso(status_updated_at)
+        if ts is not None:
+            age_sec = int((datetime.now(timezone.utc) - ts).total_seconds())
+    STALE_AFTER_SEC = int(os.getenv("STALE_AFTER_SEC", "420"))
+    fresh = age_sec is not None and age_sec < STALE_AFTER_SEC
+
+    # Control row.
+    control_state = "start"
+    try:
+        try:
+            ctrl_rows = s.select("bot_control",
+                                 filters={"user_id": f"eq.{uid}", "bot_type": f"eq.{bt}"},
+                                 limit=1)
+        except Exception:
+            ctrl_rows = s.select("bot_control", filters={"user_id": f"eq.{uid}"}, limit=1) if bt == "bachelier" else []
+        if ctrl_rows:
+            control_state = str(ctrl_rows[0].get("command") or "start").lower()
+    except Exception:
+        pass
+
+    # Trades: count today vs total, sum today's PNL, open positions.
+    trades = _select_trades_bot_aware(
+        columns="timestamp,outcome,pnl",
+        filters={"user_id": f"eq.{uid}", **_trades_bot_filter(bt)},
+        wanted_bt=bt,
+        order="timestamp.desc",
+        limit=2000,
+    )
+    today_pnl = 0.0
+    n_today = 0
+    wins_today = 0
+    losses_today = 0
+    open_positions = 0
+    for t in trades:
+        if t.get("outcome") is None:
+            open_positions += 1
+            continue
+        ts = _parse_iso(t.get("timestamp") or "")
+        if ts is None or ts < day_start_utc:
+            continue
+        n_today += 1
+        today_pnl += float(t.get("pnl") or 0)
+        if t["outcome"] == "WIN":
+            wins_today += 1
+        elif t["outcome"] == "LOSS":
+            losses_today += 1
+
+    # 'configured' = the user has ever pushed status OR has any trades for this bot.
+    configured = bool(status_rows) or bool(trades)
+
+    return {
+        "bot_type": bt,
+        "configured": configured,
+        "running": bool(status.get("running")),
+        "shadow_mode": bool(status.get("shadow_mode")),
+        "control_state": control_state,
+        "heartbeat": {
+            "age_sec": age_sec,
+            "is_fresh": fresh,
+            "stale_after_sec": STALE_AFTER_SEC,
+            "updated_at": status_updated_at,
+        },
+        "wallet_usdc": status.get("wallet_usdc"),
+        "bankroll_target": status.get("bankroll_target"),
+        "pnl_today": today_pnl,
+        "n_trades_today": n_today,
+        "wins_today": wins_today,
+        "losses_today": losses_today,
+        "open_positions": open_positions,
+        "kill_state": _kill_state_from_status(status),
+        "live_authorized": bool(status.get("live_authorized")),
+    }
+
+
+@app.get("/api/combined_summary")
+async def combined_summary(
+    response: Response,
+    polybot_session: Optional[str] = Cookie(None),
+):
+    """Per-bot rollups + merged totals. Single endpoint feeds the top bar
+    + both panes' header strips on the two-pane layout. Always returns
+    both bots; `configured: false` flags an empty pane."""
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    sess = require_session(polybot_session)
+    uid = sess["user_id"]
+    # Day window (user's local tz) for today_pnl etc.
+    now_local = datetime.now(USER_TZ)
+    local_midnight = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_start_utc = local_midnight.astimezone(timezone.utc)
+
+    copy = _per_bot_summary(uid, "copy", day_start_utc)
+    bachelier = _per_bot_summary(uid, "bachelier", day_start_utc)
+
+    # Merge rules.
+    severity = {"green": 0, "amber": 1, "red": 2}
+    combined_kill = max((copy["kill_state"], bachelier["kill_state"]),
+                        key=lambda k: severity.get(k, 0))
+    combined_pnl_today = float(copy["pnl_today"]) + float(bachelier["pnl_today"])
+    combined_bankroll = sum(
+        float(b["wallet_usdc"]) for b in (copy, bachelier)
+        if b["wallet_usdc"] is not None
+    ) or None
+    # live_authorized: amber/false unless BOTH configured bots agree they're live.
+    cfg_bots = [b for b in (copy, bachelier) if b["configured"]]
+    live_authorized = bool(cfg_bots) and all(b["live_authorized"] for b in cfg_bots)
+
+    return {
+        "copy": copy,
+        "bachelier": bachelier,
+        "combined": {
+            "pnl_today": combined_pnl_today,
+            "bankroll_usdc": combined_bankroll,
+            "kill_state": combined_kill,
+            "live_authorized": live_authorized,
+        },
+        "now_utc": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/copy_wallets")
+async def copy_wallets(polybot_session: Optional[str] = Cookie(None)):
+    """Per-wallet aggregates for the copy-bot pane.
+    Returns one row per source_wallet seen in the user's copy trades,
+    plus an 'active_wallets' count (distinct wallets with trades in the
+    last 24h). Empty list + active=0 if the bot isn't pushing yet."""
+    sess = require_session(polybot_session)
+    uid = sess["user_id"]
+    s = db()
+
+    # Pull copy-bot trades. If schema isn't migrated, we get [] back.
+    try:
+        rows = s.select(
+            "trades",
+            columns="source_wallet,outcome,pnl,timestamp",
+            filters={"user_id": f"eq.{uid}", "bot_type": "eq.copy"},
+            limit=10000,
+        )
+    except Exception:
+        # Pre-migration: source_wallet / bot_type columns missing.
+        return {"wallets": [], "active_wallets": 0, "configured": False}
+
+    if not rows:
+        return {"wallets": [], "active_wallets": 0, "configured": False}
+
+    # Pull wallet labels + paused-state from bot_status.wallet_labels /
+    # bot_status.paused_wallets if the bot pushes them.
+    wallet_labels: Dict[str, str] = {}
+    paused_set: set = set()
+    try:
+        st_rows = s.select(
+            "bot_status",
+            filters={"user_id": f"eq.{uid}", "bot_type": "eq.copy"},
+            limit=1,
+        )
+        if st_rows:
+            st = st_rows[0].get("status") or {}
+            if isinstance(st.get("wallet_labels"), dict):
+                wallet_labels = {str(k).lower(): str(v) for k, v in st["wallet_labels"].items()}
+            if isinstance(st.get("paused_wallets"), list):
+                paused_set = {str(w).lower() for w in st["paused_wallets"]}
+    except Exception:
+        pass
+
+    cutoff_24h = datetime.now(timezone.utc) - timedelta(hours=24)
+    active_wallets: set = set()
+    agg: Dict[str, Dict] = {}
+    for r in rows:
+        wallet = (r.get("source_wallet") or "").lower()
+        if not wallet:
+            wallet = "(unknown)"
+        b = agg.setdefault(wallet, {"trades": 0, "wins": 0, "losses": 0, "pnl": 0.0, "last_ts": None})
+        b["trades"] += 1
+        oc = r.get("outcome")
+        if oc == "WIN":
+            b["wins"] += 1
+        elif oc == "LOSS":
+            b["losses"] += 1
+        b["pnl"] += float(r.get("pnl") or 0)
+        ts = _parse_iso(r.get("timestamp") or "")
+        if ts is not None and (b["last_ts"] is None or ts > b["last_ts"]):
+            b["last_ts"] = ts
+        if ts is not None and ts >= cutoff_24h and wallet != "(unknown)":
+            active_wallets.add(wallet)
+
+    out = []
+    for wallet, b in agg.items():
+        resolved = b["wins"] + b["losses"]
+        wr = (b["wins"] / resolved) if resolved else 0.0
+        out.append({
+            "wallet": wallet,
+            "label": wallet_labels.get(wallet, wallet[:10] if len(wallet) > 10 else wallet),
+            "mode": "paused" if wallet in paused_set else "active",
+            "trades": b["trades"],
+            "wins": b["wins"],
+            "losses": b["losses"],
+            "win_rate": wr,
+            "pnl": b["pnl"],
+            "last_ts": b["last_ts"].isoformat() if b["last_ts"] else None,
+        })
+    out.sort(key=lambda x: x["pnl"], reverse=True)
+    return {"wallets": out, "active_wallets": len(active_wallets), "configured": True}
 
 
 @app.get("/api/per_asset")
