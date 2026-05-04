@@ -210,32 +210,54 @@ async def me(polybot_session: Optional[str] = Cookie(None)):
 # DATA ENDPOINTS — all scoped to sess['user_id']
 # ─────────────────────────────────────────────────────────
 @app.get("/api/summary")
-async def summary(response: Response, polybot_session: Optional[str] = Cookie(None)):
+async def summary(
+    response: Response,
+    bot_type: Optional[str] = None,
+    polybot_session: Optional[str] = Cookie(None),
+):
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
     response.headers["Expires"] = "0"
     sess = require_session(polybot_session)
     uid = sess["user_id"]
     s = db()
+    # bot_type defaults to bachelier so legacy /api/summary callers keep working.
+    bt = _normalize_bot_type(bot_type)
 
-    # Status blob (latest bot push)
-    status_rows = s.select("bot_status", filters={"user_id": f"eq.{uid}"}, limit=1)
+    # Status blob (latest bot push for this bot_type).
+    # Try composite filter first, fall back to single user_id read on
+    # pre-migration DBs.
+    try:
+        status_rows = s.select(
+            "bot_status",
+            filters={"user_id": f"eq.{uid}", "bot_type": f"eq.{bt}"},
+            limit=1,
+        )
+    except Exception:
+        status_rows = s.select("bot_status", filters={"user_id": f"eq.{uid}"}, limit=1)
     status = status_rows[0]["status"] if status_rows else {"running": False}
 
     # Current control command (dashboard → bot). Source of truth for button state.
     control_state = "start"
     try:
-        ctrl_rows = s.select("bot_control", filters={"user_id": f"eq.{uid}"}, limit=1)
+        try:
+            ctrl_rows = s.select(
+                "bot_control",
+                filters={"user_id": f"eq.{uid}", "bot_type": f"eq.{bt}"},
+                limit=1,
+            )
+        except Exception:
+            ctrl_rows = s.select("bot_control", filters={"user_id": f"eq.{uid}"}, limit=1)
         if ctrl_rows:
             control_state = str(ctrl_rows[0].get("command") or "start").lower()
     except Exception:
         pass  # table not yet migrated — fall back to 'start'
 
     # All resolved trades for the user (reasonable cap — dashboard doesn't need more)
-    trades = s.select(
-        "trades",
+    trades = _select_trades_bot_aware(
         columns="timestamp,outcome,pnl,confidence",
-        filters={"user_id": f"eq.{uid}"},
+        filters={"user_id": f"eq.{uid}", **_trades_bot_filter(bt)},
+        wanted_bt=bt,
         order="timestamp.desc",
         limit=1000,
     )
@@ -388,6 +410,7 @@ async def trades(
     limit: int = 25,
     shadow: Optional[str] = None,
     strategy: Optional[str] = None,
+    bot_type: Optional[str] = None,
     polybot_session: Optional[str] = Cookie(None),
 ):
     """
@@ -398,6 +421,9 @@ async def trades(
                                        so legacy rows stay visible)
       • strategy=early_entry        → early strategy only
       • strategy=scalp_exit         → scalp strategy only
+      • bot_type=copy | bachelier   → restrict to one bot. Legacy NULL
+                                       rows fold into 'bachelier' (matches
+                                       the storage default).
       • omit                        → all rows (backwards-compatible)
     """
     sess = require_session(polybot_session)
@@ -417,9 +443,26 @@ async def trades(
             filters["strategy_label"] = "eq.early_entry"
         elif s_norm == "scalp_exit":
             filters["strategy_label"] = "eq.scalp_exit"
+    bt_norm: Optional[str] = None
+    if bot_type:
+        bt_norm = _normalize_bot_type(bot_type)
+        if bt_norm == "bachelier":
+            # Legacy rows have NULL bot_type → fold them into the bachelier view.
+            existing_or = filters.pop("or", None)
+            bt_or = "(bot_type.eq.bachelier,bot_type.is.null)"
+            # If a strategy 'or' is already set, the two ORs would compose
+            # incorrectly under PostgREST. Detect + skip the bot_type fold-in
+            # because all strategy_label rows are bachelier-only anyway.
+            if existing_or:
+                filters["or"] = existing_or
+            else:
+                filters["or"] = bt_or
+        else:
+            filters["bot_type"] = "eq.copy"
     # Column lists per fallback layer. Newest-added columns first so they
     # get dropped earliest if the DB schema hasn't caught up.
-    _COLS_FULL = "trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode,shadow,strategy_label,exit_trigger,entry_bid,exit_bid,realized_pnl_partial"
+    _COLS_FULL = "trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode,shadow,strategy_label,exit_trigger,entry_bid,exit_bid,realized_pnl_partial,bot_type,source_wallet"
+    _COLS_NO_BOT = "trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode,shadow,strategy_label,exit_trigger,entry_bid,exit_bid,realized_pnl_partial"
     _COLS_NO_SCALP = "trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode,shadow,strategy_label"
     _COLS_NO_STRAT = "trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode,shadow"
     _COLS_NO_SHADOW = "trade_id,timestamp,asset,direction,entry_price,size_usd,shares,confidence,status,outcome,pnl,resolved_at,end_time,mode"
@@ -427,28 +470,45 @@ async def trades(
     try:
         rows = db().select("trades", columns=_COLS_FULL, filters=filters, order="timestamp.desc", limit=int(limit))
     except Exception:
-        # Fallback 1: scalp_exit telemetry columns missing.
+        # Fallback 0: bot_type / source_wallet columns missing. Drop the
+        # bot_type filter too if it was set.
+        filters.pop("bot_type", None)
+        # The 'or' filter might be the bot_type fold-in OR the strategy fold-in.
+        # We can't tell here, so drop both - the strategy filter falls back below.
+        had_or = filters.pop("or", None)
         try:
-            rows = db().select("trades", columns=_COLS_NO_SCALP, filters=filters, order="timestamp.desc", limit=int(limit))
+            rows = db().select("trades", columns=_COLS_NO_BOT, filters=filters, order="timestamp.desc", limit=int(limit))
         except Exception:
-            # Fallback 2: no strategy_label column yet — drop the filter too,
-            # otherwise PostgREST would still 4xx on the missing column.
-            filters.pop("strategy_label", None)
-            filters.pop("or", None)
+            # Fallback 1: scalp_exit telemetry columns missing.
             try:
-                rows = db().select("trades", columns=_COLS_NO_STRAT, filters=filters, order="timestamp.desc", limit=int(limit))
+                rows = db().select("trades", columns=_COLS_NO_SCALP, filters=filters, order="timestamp.desc", limit=int(limit))
             except Exception:
-                # Fallback 3: no shadow column yet.
-                filters.pop("shadow", None)
+                # Fallback 2: no strategy_label column yet - drop the filter too,
+                # otherwise PostgREST would still 4xx on the missing column.
+                filters.pop("strategy_label", None)
                 try:
-                    rows = db().select("trades", columns=_COLS_NO_SHADOW, filters=filters, order="timestamp.desc", limit=int(limit))
+                    rows = db().select("trades", columns=_COLS_NO_STRAT, filters=filters, order="timestamp.desc", limit=int(limit))
                 except Exception:
-                    rows = db().select("trades", columns=_COLS_BASE, filters=filters, order="timestamp.desc", limit=int(limit))
+                    # Fallback 3: no shadow column yet.
+                    filters.pop("shadow", None)
+                    try:
+                        rows = db().select("trades", columns=_COLS_NO_SHADOW, filters=filters, order="timestamp.desc", limit=int(limit))
+                    except Exception:
+                        rows = db().select("trades", columns=_COLS_BASE, filters=filters, order="timestamp.desc", limit=int(limit))
+    # If we successfully fetched but the bot_type filter was dropped due to
+    # a missing column, post-filter in Python so the caller still gets the
+    # expected scope. Legacy rows have no bot_type → treat as bachelier.
+    if bt_norm and rows and "bot_type" not in (rows[0] or {}):
+        # bot_type column doesn't exist → all rows are implicitly bachelier.
+        if bt_norm == "copy":
+            rows = []
     for r in rows:
         # Backfill: legacy rows without strategy_label default to core
         # (expiry_convergence) so the dashboard renders consistently.
         if not r.get("strategy_label"):
             r["strategy_label"] = "expiry_convergence"
+        if not r.get("bot_type"):
+            r["bot_type"] = "bachelier"
         tf = "5m"
         if r.get("timestamp") and r.get("end_time"):
             try:
@@ -486,7 +546,10 @@ def _bucket_trigger(raw: Optional[str]) -> str:
 
 
 @app.get("/api/strategy_compare")
-async def strategy_compare(polybot_session: Optional[str] = Cookie(None)):
+async def strategy_compare(
+    bot_type: Optional[str] = None,
+    polybot_session: Optional[str] = Cookie(None),
+):
     """Per-strategy aggregate (n, W/L, net PNL, mean ask, profit factor).
 
     Wilson 95% CI is computed client-side from n and W (cheaper than
@@ -498,39 +561,56 @@ async def strategy_compare(polybot_session: Optional[str] = Cookie(None)):
     many resolved scalp trades exited via take_profit / stop_loss /
     time_exit / resolution / other. Frontend renders this as a single
     extra row inside the SCALP column.
+
+    bot_type defaults to bachelier - strategies are a bachelier-only concept.
+    Caller may pass bot_type=bachelier explicitly; copy or 'all' is silently
+    coerced to bachelier here since copy bot has no strategy_label.
     """
     sess = require_session(polybot_session)
     uid = sess["user_id"]
-    # Try with exit_trigger first; fall back to without it (pre-scalp-migration),
-    # then to without strategy_label (pre-strategy-split).
+    # Coerce: this endpoint only makes sense for bachelier. Avoid surprising
+    # the caller by silently re-scoping if they passed bot_type=copy.
+    _ = _normalize_bot_type(bot_type)  # validate format only
+    base_filters = {"user_id": f"eq.{uid}"}
+    bachelier_filters = {**base_filters, "or": "(bot_type.eq.bachelier,bot_type.is.null)"}
+    # Try with exit_trigger + bot_type filter; fall back through migration layers.
     try:
         rows = db().select(
             "trades",
             columns="outcome,pnl,entry_price,strategy_label,exit_trigger",
-            filters={"user_id": f"eq.{uid}"},
+            filters=bachelier_filters,
             limit=10000,
         )
     except Exception:
+        # Drop bot_type filter (column may not exist).
         try:
             rows = db().select(
                 "trades",
-                columns="outcome,pnl,entry_price,strategy_label",
-                filters={"user_id": f"eq.{uid}"},
+                columns="outcome,pnl,entry_price,strategy_label,exit_trigger",
+                filters=base_filters,
                 limit=10000,
             )
-            for r in rows:
-                r["exit_trigger"] = None
         except Exception:
-            # Pre-strategy-split DB: no strategy_label column. Treat as all core.
-            rows = db().select(
-                "trades",
-                columns="outcome,pnl,entry_price",
-                filters={"user_id": f"eq.{uid}"},
-                limit=10000,
-            )
-            for r in rows:
-                r["strategy_label"] = "expiry_convergence"
-                r["exit_trigger"] = None
+            try:
+                rows = db().select(
+                    "trades",
+                    columns="outcome,pnl,entry_price,strategy_label",
+                    filters=base_filters,
+                    limit=10000,
+                )
+                for r in rows:
+                    r["exit_trigger"] = None
+            except Exception:
+                # Pre-strategy-split DB: no strategy_label column. Treat as all core.
+                rows = db().select(
+                    "trades",
+                    columns="outcome,pnl,entry_price",
+                    filters=base_filters,
+                    limit=10000,
+                )
+                for r in rows:
+                    r["strategy_label"] = "expiry_convergence"
+                    r["exit_trigger"] = None
 
     def _empty() -> Dict:
         return {"n": 0, "w": 0, "l": 0, "net": 0.0, "asks": [], "wins_pnl": 0.0, "loss_pnl": 0.0}
@@ -596,12 +676,16 @@ async def strategy_compare(polybot_session: Optional[str] = Cookie(None)):
 
 
 @app.get("/api/per_asset")
-async def per_asset(polybot_session: Optional[str] = Cookie(None)):
+async def per_asset(
+    bot_type: Optional[str] = None,
+    polybot_session: Optional[str] = Cookie(None),
+):
     sess = require_session(polybot_session)
-    rows = db().select(
-        "trades",
+    filters = {"user_id": f"eq.{sess['user_id']}", **_trades_bot_filter(bot_type)}
+    rows = _select_trades_bot_aware(
         columns="asset,outcome,pnl",
-        filters={"user_id": f"eq.{sess['user_id']}"},
+        filters=filters,
+        wanted_bt=bot_type,
         limit=5000,
     )
     agg: Dict[str, Dict] = {}
@@ -628,12 +712,16 @@ async def per_asset(polybot_session: Optional[str] = Cookie(None)):
 
 
 @app.get("/api/wr_by_timeframe")
-async def wr_by_timeframe(polybot_session: Optional[str] = Cookie(None)):
+async def wr_by_timeframe(
+    bot_type: Optional[str] = None,
+    polybot_session: Optional[str] = Cookie(None),
+):
     sess = require_session(polybot_session)
-    rows = db().select(
-        "trades",
+    filters = {"user_id": f"eq.{sess['user_id']}", **_trades_bot_filter(bot_type)}
+    rows = _select_trades_bot_aware(
         columns="timestamp,end_time,outcome,pnl",
-        filters={"user_id": f"eq.{sess['user_id']}"},
+        filters=filters,
+        wanted_bt=bot_type,
         limit=5000,
     )
     agg: Dict[str, Dict] = {"5m": {"total": 0, "wins": 0, "pnl": 0.0},
@@ -687,12 +775,16 @@ async def signals(polybot_session: Optional[str] = Cookie(None)):
 
 
 @app.get("/api/hourly")
-async def hourly(polybot_session: Optional[str] = Cookie(None)):
+async def hourly(
+    bot_type: Optional[str] = None,
+    polybot_session: Optional[str] = Cookie(None),
+):
     sess = require_session(polybot_session)
-    rows = db().select(
-        "trades",
+    filters = {"user_id": f"eq.{sess['user_id']}", **_trades_bot_filter(bot_type)}
+    rows = _select_trades_bot_aware(
         columns="timestamp,outcome",
-        filters={"user_id": f"eq.{sess['user_id']}"},
+        filters=filters,
+        wanted_bt=bot_type,
         limit=5000,
     )
     agg: Dict[int, Dict] = {}
@@ -720,13 +812,15 @@ async def hourly(polybot_session: Optional[str] = Cookie(None)):
 @app.get("/api/pnl_series")
 async def pnl_series(
     limit: int = 200,
+    bot_type: Optional[str] = None,
     polybot_session: Optional[str] = Cookie(None),
 ):
     sess = require_session(polybot_session)
-    rows = db().select(
-        "trades",
+    filters = {"user_id": f"eq.{sess['user_id']}", **_trades_bot_filter(bot_type)}
+    rows = _select_trades_bot_aware(
         columns="timestamp,pnl,outcome",
-        filters={"user_id": f"eq.{sess['user_id']}"},
+        filters=filters,
+        wanted_bt=bot_type,
         order="timestamp.asc",
         limit=int(limit),
     )
@@ -824,6 +918,34 @@ def _normalize_bot_type(raw) -> str:
         return "bachelier"
     s = str(raw).strip().lower()
     return s if s in ("copy", "bachelier") else "bachelier"
+
+
+def _trades_bot_filter(bot_type: Optional[str]) -> Dict[str, str]:
+    """Return the filter fragment to scope trades by bot_type, or {} for no filter.
+    Legacy rows (NULL bot_type) fold into bachelier so single-bot tenants
+    keep showing their trades after migration."""
+    if not bot_type:
+        return {}
+    bt = _normalize_bot_type(bot_type)
+    if bt == "bachelier":
+        return {"or": "(bot_type.eq.bachelier,bot_type.is.null)"}
+    return {"bot_type": "eq.copy"}
+
+
+def _select_trades_bot_aware(columns: str, filters: Dict[str, str], wanted_bt: Optional[str], **kwargs) -> List[Dict]:
+    """db().select on trades, with bot_type filter degraded if the column is missing.
+    If the column doesn't exist and the caller wanted bot_type='copy', returns []
+    (because every row is implicitly bachelier on a pre-migration DB)."""
+    try:
+        return db().select("trades", columns=columns, filters=filters, **kwargs)
+    except Exception:
+        f2 = dict(filters)
+        f2.pop("bot_type", None)
+        f2.pop("or", None)
+        rows = db().select("trades", columns=columns, filters=f2, **kwargs)
+        if wanted_bt and _normalize_bot_type(wanted_bt) == "copy":
+            return []
+        return rows
 
 
 @app.post("/api/bot/push")
