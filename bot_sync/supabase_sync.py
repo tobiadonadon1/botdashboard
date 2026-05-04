@@ -17,6 +17,7 @@ USAGE on the local bot:
         "net_pnl": 127.34,
     })
 
+    # --- Bachelier (signal) bot push ---
     sync.push_trade({
         "trade_id": "abc123",
         "timestamp": "2026-04-16T14:05:00Z",
@@ -33,7 +34,35 @@ USAGE on the local bot:
         "entry_bid": 0.51,
         "exit_bid": 0.58,
         "realized_pnl_partial": 7.0,     # subset of pnl realised via the scalp exit
-    })
+    },
+    bot_type="bachelier")  # default; explicit here for clarity
+
+    # --- Copy bot push (mirrors a whale wallet trade) ---
+    # bot_type='copy' lights up the SCALP-pane-equivalent left column.
+    # source_wallet is the whale address we're mirroring; the dashboard's
+    # /api/copy_wallets endpoint aggregates by this field.
+    sync.push_trade({
+        "trade_id": "copy-xyz999",
+        "timestamp": "2026-04-16T14:08:00Z",
+        "asset": "BTC", "direction": "DOWN",
+        "entry_price": 0.48, "size_usd": 25.0, "shares": 52.0,
+        "confidence": 0.65, "status": "PLACED",
+        "end_time": "2026-04-16T14:13:00Z",
+        "source_wallet": "0xWhaleAddressHere...",
+    },
+    bot_type="copy")
+
+    # --- Copy-bot status push, with friendly wallet labels + paused list ---
+    # Optional fields (status payload is opaque jsonb): wallet_labels and
+    # paused_wallets are surfaced by /api/copy_wallets if present.
+    sync.push_status({
+        "running": True,
+        "wallet_usdc": 232.50,
+        "wallet_labels": {"0xWhaleAddressHere...": "Donut", "0x...": "WhaleKing"},
+        "paused_wallets": ["0x..."],
+        "live_authorized": False,
+    },
+    bot_type="copy")
 
     sync.push_signal({"signal_name": "rsi_oversold", "times_seen": 42,
                        "times_correct": 25, "win_rate": 0.595, "weight": 1.2})
@@ -123,14 +152,22 @@ class DashboardSync:
         return False
 
     # ── Public API ──────────────────────────────────────
-    def push_status(self, status: Dict[str, Any]) -> bool:
-        """Upsert the bot's current status snapshot (called every cycle)."""
-        return self._post({"type": "status", "data": status})
+    # bot_type ∈ {'copy', 'bachelier'}. Defaults to 'bachelier' so existing
+    # single-bot deployments don't have to set the keyword. Anything else
+    # (or omitted) collapses to 'bachelier' on the server side.
 
-    def push_trade(self, trade: Union[Dict[str, Any], List[Dict[str, Any]]]) -> bool:
-        """Upsert one or many trades by trade_id (idempotent)."""
-        return self._post({"type": "trade", "data": trade})
+    def push_status(self, status: Dict[str, Any], *, bot_type: str = "bachelier") -> bool:
+        """Upsert this bot's current status snapshot (called every cycle).
+        Each (user, bot_type) row is independent on the server."""
+        return self._post({"type": "status", "bot_type": bot_type, "data": status})
 
-    def push_signal(self, signal: Union[Dict[str, Any], List[Dict[str, Any]]]) -> bool:
+    def push_trade(self, trade: Union[Dict[str, Any], List[Dict[str, Any]]],
+                   *, bot_type: str = "bachelier") -> bool:
+        """Upsert one or many trades by trade_id (idempotent).
+        For copy bot trades, include `source_wallet` in each trade dict."""
+        return self._post({"type": "trade", "bot_type": bot_type, "data": trade})
+
+    def push_signal(self, signal: Union[Dict[str, Any], List[Dict[str, Any]]],
+                    *, bot_type: str = "bachelier") -> bool:
         """Upsert signal performance row(s)."""
-        return self._post({"type": "signal", "data": signal})
+        return self._post({"type": "signal", "bot_type": bot_type, "data": signal})
