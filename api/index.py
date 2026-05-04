@@ -750,38 +750,65 @@ async def bot_control_set(
     request: Request,
     polybot_session: Optional[str] = Cookie(None),
 ):
+    """Set pause/start for a single bot, or for both if body.bot_type='all'."""
     sess = require_session(polybot_session)
     body = await request.json()
     cmd = str(body.get("command", "")).lower().strip()
     if cmd not in ("start", "pause"):
         raise HTTPException(status_code=400, detail="command must be 'start' or 'pause'")
-    try:
-        db().upsert(
-            "bot_control",
-            {
-                "user_id": sess["user_id"],
-                "command": cmd,
-                "issued_at": datetime.now(timezone.utc).isoformat(),
-                "issued_by": sess.get("username") or "dashboard",
-            },
-            on_conflict="user_id",
-        )
-    except Exception as e:
-        # Most common: migration not run yet → table doesn't exist.
-        raise HTTPException(
-            status_code=503,
-            detail=f"bot_control table missing? Run SQL migration. ({str(e)[:140]})",
-        )
-    return {"ok": True, "command": cmd}
+    raw_bt = body.get("bot_type")
+    target_bots = ("copy", "bachelier") if str(raw_bt or "").lower() == "all" else (_normalize_bot_type(raw_bt),)
+    issued_by = sess.get("username") or "dashboard"
+    issued_at = datetime.now(timezone.utc).isoformat()
+    written: List[str] = []
+    for bt in target_bots:
+        row = {
+            "user_id": sess["user_id"],
+            "bot_type": bt,
+            "command": cmd,
+            "issued_at": issued_at,
+            "issued_by": issued_by,
+        }
+        try:
+            # Migrated DB: composite PK
+            db().upsert("bot_control", row, on_conflict="user_id,bot_type")
+        except Exception:
+            # Pre-migration: drop bot_type, fall back to single-PK upsert.
+            # On a pre-migration DB, halting one bot halts the only row.
+            try:
+                row.pop("bot_type", None)
+                db().upsert("bot_control", row, on_conflict="user_id")
+            except Exception as e:
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"bot_control table missing? Run SQL migration. ({str(e)[:140]})",
+                )
+        written.append(bt)
+    return {"ok": True, "command": cmd, "bot_types": written}
 
 
 @app.get("/api/bot/control")
-async def bot_control_get(authorization: Optional[str] = Header(None)):
+async def bot_control_get(
+    authorization: Optional[str] = Header(None),
+    bot_type: Optional[str] = None,
+):
+    """Bot polls this. Pass ?bot_type=copy or bachelier; defaults to bachelier
+    so pre-two-bot bots keep working without a code change."""
     user = require_bot_key(authorization)
-    rows = db().select("bot_control", filters={"user_id": f"eq.{user['id']}"}, limit=1)
+    bt = _normalize_bot_type(bot_type)
+    filters = {"user_id": f"eq.{user['id']}", "bot_type": f"eq.{bt}"}
+    try:
+        rows = db().select("bot_control", filters=filters, limit=1)
+    except Exception:
+        # Pre-migration: bot_type column missing. Fall back to single-row read.
+        rows = db().select("bot_control", filters={"user_id": f"eq.{user['id']}"}, limit=1)
     if not rows:
-        return {"command": "start", "issued_at": None}
-    return {"command": rows[0].get("command") or "start", "issued_at": rows[0].get("issued_at")}
+        return {"command": "start", "issued_at": None, "bot_type": bt}
+    return {
+        "command": rows[0].get("command") or "start",
+        "issued_at": rows[0].get("issued_at"),
+        "bot_type": bt,
+    }
 
 
 # ─────────────────────────────────────────────────────────
@@ -789,6 +816,16 @@ async def bot_control_get(authorization: Optional[str] = Header(None)):
 #   Bot POSTs: {"type": "status"|"trade"|"signal", "data": {...}}
 #   Authenticates via Authorization: Bearer <bot_api_key>
 # ─────────────────────────────────────────────────────────
+def _normalize_bot_type(raw) -> str:
+    """Validate bot_type to one of {'copy', 'bachelier'}; default bachelier.
+    Pre-two-bot pushes (no bot_type field) collapse to 'bachelier' so existing
+    single-bot tenants keep working without a bot-side change."""
+    if not raw:
+        return "bachelier"
+    s = str(raw).strip().lower()
+    return s if s in ("copy", "bachelier") else "bachelier"
+
+
 @app.post("/api/bot/push")
 async def bot_push(
     request: Request,
@@ -800,6 +837,10 @@ async def bot_push(
     body = await request.json()
     kind = str(body.get("type", "")).lower()
     data = body.get("data") or {}
+    # bot_type lives at the top level of the push envelope (not inside `data`)
+    # so it applies to every row in a batch trade-push. Pre-two-bot bots that
+    # don't send the field default to 'bachelier'.
+    bot_type = _normalize_bot_type(body.get("bot_type"))
     if not isinstance(data, (dict, list)):
         raise HTTPException(status_code=400, detail="`data` must be an object or list")
 
@@ -807,16 +848,23 @@ async def bot_push(
     if kind == "status":
         if not isinstance(data, dict):
             raise HTTPException(status_code=400, detail="status `data` must be object")
-        s.upsert(
-            "bot_status",
-            {
-                "user_id": uid,
-                "status": data,
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            },
-            on_conflict="user_id",
-        )
-        return {"ok": True, "type": "status"}
+        status_row = {
+            "user_id": uid,
+            "bot_type": bot_type,
+            "status": data,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            # Migrated DB: composite PK (user_id, bot_type).
+            s.upsert("bot_status", status_row, on_conflict="user_id,bot_type")
+        except Exception:
+            # Pre-migration DB: single PK on user_id, no bot_type column.
+            # Drop bot_type, fall back to legacy upsert. Means both bots would
+            # overwrite each other's status row, but we degrade gracefully
+            # instead of 500-ing.
+            status_row.pop("bot_type", None)
+            s.upsert("bot_status", status_row, on_conflict="user_id")
+        return {"ok": True, "type": "status", "bot_type": bot_type}
 
     if kind == "trade":
         rows = data if isinstance(data, list) else [data]
@@ -857,40 +905,51 @@ async def bot_push(
                 "entry_bid": r.get("entry_bid"),
                 "exit_bid": r.get("exit_bid"),
                 "realized_pnl_partial": r.get("realized_pnl_partial"),
+                # Two-bot model: bot_type at envelope-level applies to whole batch.
+                # source_wallet is per-row because the copy bot mirrors many wallets.
+                "bot_type": bot_type,
+                "source_wallet": r.get("source_wallet") if bot_type == "copy" else None,
             })
         try:
             s.upsert("trades", payload, on_conflict="user_id,trade_id")
         except Exception:
             # Cascading retry - drop newest optional columns first, fall back to
             # progressively older shapes if the DB hasn't been migrated yet.
-            # Layer 0 = scalp_exit telemetry (4 cols added together).
+            # Layer 0 = bot_type + source_wallet (two-bot migration, newest).
             for p in payload:
-                p.pop("exit_trigger", None)
-                p.pop("entry_bid", None)
-                p.pop("exit_bid", None)
-                p.pop("realized_pnl_partial", None)
+                p.pop("bot_type", None)
+                p.pop("source_wallet", None)
             try:
                 s.upsert("trades", payload, on_conflict="user_id,trade_id")
             except Exception:
+                # Layer 1 = scalp_exit telemetry (4 cols added together).
                 for p in payload:
-                    p.pop("strategy_label", None)
+                    p.pop("exit_trigger", None)
+                    p.pop("entry_bid", None)
+                    p.pop("exit_bid", None)
+                    p.pop("realized_pnl_partial", None)
                 try:
                     s.upsert("trades", payload, on_conflict="user_id,trade_id")
                 except Exception:
                     for p in payload:
-                        p.pop("shadow", None)
+                        p.pop("strategy_label", None)
                     try:
                         s.upsert("trades", payload, on_conflict="user_id,trade_id")
                     except Exception:
                         for p in payload:
-                            p.pop("mode", None)
+                            p.pop("shadow", None)
                         try:
                             s.upsert("trades", payload, on_conflict="user_id,trade_id")
                         except Exception:
                             for p in payload:
-                                p.pop("timeframe", None)
-                            s.upsert("trades", payload, on_conflict="user_id,trade_id")
-        return {"ok": True, "type": "trade", "count": len(payload)}
+                                p.pop("mode", None)
+                            try:
+                                s.upsert("trades", payload, on_conflict="user_id,trade_id")
+                            except Exception:
+                                for p in payload:
+                                    p.pop("timeframe", None)
+                                s.upsert("trades", payload, on_conflict="user_id,trade_id")
+        return {"ok": True, "type": "trade", "count": len(payload), "bot_type": bot_type}
 
     if kind == "signal":
         rows = data if isinstance(data, list) else [data]
@@ -906,42 +965,65 @@ async def bot_push(
                 "times_correct": r.get("times_correct", 0),
                 "win_rate": r.get("win_rate", 0.5),
                 "weight": r.get("weight", 1.0),
+                "bot_type": bot_type,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             })
-        s.upsert("signal_performance", payload, on_conflict="user_id,asset,signal_name")
-        return {"ok": True, "type": "signal", "count": len(payload)}
+        try:
+            s.upsert("signal_performance", payload, on_conflict="user_id,asset,signal_name")
+        except Exception:
+            # Pre-migration: drop bot_type and retry.
+            for p in payload:
+                p.pop("bot_type", None)
+            s.upsert("signal_performance", payload, on_conflict="user_id,asset,signal_name")
+        return {"ok": True, "type": "signal", "count": len(payload), "bot_type": bot_type}
 
     if kind == "reset":
-        # Wipe all user data (trades, signals, status). Idempotent.
-        # Scope: user_id only. No cross-user impact.
+        # Wipe user data, optionally scoped to a single bot_type. Idempotent.
+        # Scope: user_id (+ optional bot_type). No cross-user impact.
         scope = data.get("scope") if isinstance(data, dict) else None
         scopes = set(scope) if isinstance(scope, list) else {"trades", "signals", "status"}
+        # If body.bot_type was set, only wipe that bot's rows.
+        # If not set (backward-compat / pre-two-bot bots), wipe everything for the user.
+        scope_filter: Dict[str, str] = {"user_id": f"eq.{uid}"}
+        if body.get("bot_type"):
+            scope_filter["bot_type"] = f"eq.{bot_type}"
         deleted = {}
         try:
             if "trades" in scopes:
-                r = s.delete("trades", filters={"user_id": f"eq.{uid}"})
+                try:
+                    r = s.delete("trades", filters=scope_filter)
+                except Exception:
+                    # Pre-migration: bot_type column missing. Drop the filter
+                    # and fall back to wiping every trade for the user.
+                    r = s.delete("trades", filters={"user_id": f"eq.{uid}"})
                 deleted["trades"] = r
             if "signals" in scopes:
-                r = s.delete("signal_performance", filters={"user_id": f"eq.{uid}"})
+                try:
+                    r = s.delete("signal_performance", filters=scope_filter)
+                except Exception:
+                    r = s.delete("signal_performance", filters={"user_id": f"eq.{uid}"})
                 deleted["signals"] = r
             if "status" in scopes:
-                s.upsert(
-                    "bot_status",
-                    {
-                        "user_id": uid,
-                        "status": {
-                            "running": False, "dry_run": False,
-                            "net_pnl": 0, "today_pnl": 0,
-                            "scale_level": None, "last_update": None,
-                        },
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
-                    },
-                    on_conflict="user_id",
-                )
+                empty_status = {
+                    "running": False, "dry_run": False,
+                    "net_pnl": 0, "today_pnl": 0,
+                    "scale_level": None, "last_update": None,
+                }
+                status_row = {
+                    "user_id": uid,
+                    "bot_type": bot_type,
+                    "status": empty_status,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+                try:
+                    s.upsert("bot_status", status_row, on_conflict="user_id,bot_type")
+                except Exception:
+                    status_row.pop("bot_type", None)
+                    s.upsert("bot_status", status_row, on_conflict="user_id")
                 deleted["status"] = "reset"
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"reset failed: {e}")
-        return {"ok": True, "type": "reset", "deleted": deleted}
+        return {"ok": True, "type": "reset", "deleted": deleted, "bot_type": bot_type}
 
     raise HTTPException(status_code=400, detail=f"Unknown type: {kind}")
 
