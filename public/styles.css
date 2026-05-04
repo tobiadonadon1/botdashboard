@@ -2262,3 +2262,43 @@ th.sort-desc::after { content: '▼'; opacity: 0.8; color: var(--green-bright); 
 .copy-activity .ca-pnl.pos { color: var(--green-bright); }
 .copy-activity .ca-pnl.neg { color: var(--red); }
 .copy-activity .ca-pnl.dim { color: var(--text-dim); }
+
+/* --- Two-pane responsive: stack vertically below 900px --- */
+@media (max-width: 900px) {
+  .topbar.topbar-v2 {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 10px 16px;
+  }
+  .topbar-v2 .tb-left,
+  .topbar-v2 .tb-right { justify-content: center; flex-wrap: wrap; }
+  .topbar-v2 .tb-center { min-width: 0; }
+  .combined-pnl { font-size: 1.8rem; }
+  .two-pane {
+    grid-template-columns: 1fr;
+    padding-bottom: 64px;
+  }
+  .pane.pane-copy {
+    border-right: none;
+    border-bottom: 1px solid var(--border-strong);
+  }
+  .pane-header { position: relative; top: 0; }
+}
+@media (max-width: 600px) {
+  .topbar.topbar-v2 { padding: 8px 12px; }
+  .combined-pnl { font-size: 1.6rem; }
+  .combined-pnl-label { font-size: 0.58rem; }
+  .pane-header { padding: 12px 14px 8px; }
+  .pane-title { font-size: 0.78rem; letter-spacing: 0.20em; }
+  .pane-meta { gap: 12px; }
+  .meta-item { font-size: 0.72rem; }
+  .meta-label { font-size: 0.56rem; }
+  .pane-body { padding: 12px 14px 18px; }
+  /* Bottom bar tightens; rail pills wrap onto a second row if needed */
+  .bottombar { padding: 8px 12px; gap: 8px; flex-wrap: wrap; }
+  .bb-rail { font-size: 0.58rem; padding: 2px 7px; }
+  .halt-all-btn { font-size: 0.72rem; padding: 6px 14px; letter-spacing: 0.12em; }
+  /* Copy wallet table compresses: drop the trades column on phones */
+  .copy-wallet-table th:nth-child(3),
+  .copy-wallet-table td:nth-child(3) { display: none; }
+}
