@@ -9,29 +9,37 @@
 </head>
 <body class="mode-monitor range-today">
 
-<div class="topbar">
-  <div class="topbar-left">
+<!-- Top bar: combined-PnL hero + combined kill state + live indicator.
+     Per-bot detail (status pill, scale-level, mode toggle) lives inside
+     each pane below. -->
+<div class="topbar topbar-v2">
+  <div class="tb-left">
     <button class="mobile-menu-btn" id="mobileMenuBtn" aria-label="Menu">&#9776;</button>
     <div class="topbar-logo">POLYBOT</div>
-    <div class="status-pill">
-      <span class="status-dot" id="statusDot"></span>
-      <span id="statusText">--</span>
+    <div class="status-pill" title="Combined kill state across both bots (max severity)">
+      <span class="status-dot" id="combinedKillDot"></span>
+      <span id="combinedKillTxt">--</span>
     </div>
-    <div class="status-pill hide-mobile">
-      <span id="modeText">--</span>
-    </div>
-    <div class="mode-toggle" role="group" aria-label="Control mode">
+    <div class="mode-toggle hide-mobile" role="group" aria-label="Control mode">
       <button class="mode-btn" data-mode="monitor" id="modeMonitorBtn" title="Read-only (default)">MONITOR</button>
       <button class="mode-btn" data-mode="pilot" id="modePilotBtn" title="Core controls unlocked">PILOT</button>
       <button class="mode-btn" data-mode="expert" id="modeExpertBtn" title="Everything unlocked + debug">EXPERT</button>
     </div>
-    <div class="ctrl-group pilot-only hide-mobile">
-      <button class="ctrl-btn ctrl-start" id="startBtn" title="Resume the bot">▶ START</button>
-      <button class="ctrl-btn ctrl-pause" id="pauseBtn" title="Pause the bot (no new trades)">❚❚ PAUSE</button>
-      <span class="ctrl-status" id="ctrlStatus"></span>
+  </div>
+
+  <div class="tb-center">
+    <div class="combined-pnl-label">today combined p&amp;l</div>
+    <div class="combined-pnl" id="combinedPnl">$0.00</div>
+    <div class="combined-bankroll-row">
+      <span class="combined-bankroll" id="combinedBankroll">$-- / $500</span>
+      <span class="live-indicator" id="liveIndicator" title="LIVE_AUTHORIZED across both bots">
+        <span class="live-dot"></span>
+        live: <span id="liveState">no</span>
+      </span>
     </div>
   </div>
-  <div class="topbar-right">
+
+  <div class="tb-right">
     <select class="range-sel" id="timeRangeSel" title="Time range for P&L/WR panels">
       <option value="today">Today</option>
       <option value="24h">Last 24h</option>
@@ -44,6 +52,20 @@
     <div class="user-tag hide-mobile">USER: <span id="usernameTag">--</span></div>
     <div class="user-tag clock-tag" id="localTimeTag" title="local · UTC"><span id="localTime">--</span></div>
     <button class="logout-btn hide-mobile" id="logoutBtn">LOGOUT</button>
+  </div>
+</div>
+
+<!-- Hidden legacy nodes still referenced by app.js loadSummary().
+     Two-pane layout no longer surfaces them in the topbar; remove once
+     app.js fully decouples from the single-bot topbar shape. -->
+<div class="legacy-hidden">
+  <span id="statusDot" class="status-dot"></span>
+  <span id="statusText"></span>
+  <span id="modeText"></span>
+  <div class="ctrl-group" id="legacyCtrlGroup">
+    <button class="ctrl-btn ctrl-start" id="startBtn">▶ START</button>
+    <button class="ctrl-btn ctrl-pause" id="pauseBtn">❚❚ PAUSE</button>
+    <span class="ctrl-status" id="ctrlStatus"></span>
   </div>
 </div>
 
@@ -116,7 +138,43 @@
   </div>
 </div>
 
-<div class="container">
+<!-- Two-pane: left = copy bot (lean), right = bachelier signal bot
+     (rich, wraps all the existing widgets). Each pane scrolls independently. -->
+<div class="two-pane">
+
+  <aside class="pane pane-copy" id="paneCopy">
+    <header class="pane-header">
+      <h2 class="pane-title">COPY BOT</h2>
+      <div class="pane-meta">
+        <span class="meta-item"><span class="meta-label">bankroll</span> <span class="meta-val" id="copyBankroll">$--</span></span>
+        <span class="meta-item"><span class="meta-label">today p&amp;l</span> <span class="meta-val" id="copyPnlToday">$0.00</span></span>
+        <span class="meta-item"><span class="meta-label">open</span> <span class="meta-val" id="copyOpen">0</span></span>
+        <span class="meta-item"><span class="meta-label">active</span> <span class="meta-val" id="copyActiveWallets">0/10</span></span>
+      </div>
+    </header>
+    <div class="pane-body" id="paneCopyBody">
+      <!-- Per-wallet table + activity feed render here in commit 6.
+           Empty state shown for tenants with no copy-bot data. -->
+      <div class="pane-empty" id="copyEmpty">
+        <div class="pane-empty-title">no copy bot configured</div>
+        <div class="pane-empty-sub">push trades with bot_type=copy to populate this pane</div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="pane pane-bachelier" id="paneBachelier">
+    <header class="pane-header">
+      <h2 class="pane-title">SIGNAL BOT <span class="pane-subtitle">bachelier</span></h2>
+      <div class="pane-meta">
+        <span class="meta-item"><span class="meta-label">bankroll</span> <span class="meta-val" id="bachBankroll">$--</span></span>
+        <span class="meta-item"><span class="meta-label">today p&amp;l</span> <span class="meta-val" id="bachPnlToday">$0.00</span></span>
+        <span class="meta-item"><span class="meta-label">open</span> <span class="meta-val" id="bachOpen">0</span></span>
+        <span class="meta-item"><span class="meta-label">assets</span> <span class="meta-val" id="bachAssets">--</span></span>
+      </div>
+    </header>
+    <div class="pane-body">
+      <!-- All existing rich widgets live inside this container -->
+      <div class="container container-in-pane">
 
   <!-- ─── ROW 1 — HERO: Today's P&L (dominant) + Live WR + Wallet ─── -->
   <div class="grid hero-grid">
@@ -555,6 +613,28 @@
     </div>
   </div>
 
+      </div><!-- /container.container-in-pane -->
+    </div><!-- /pane-body -->
+  </main><!-- /pane-bachelier -->
+
+</div><!-- /two-pane -->
+
+<!-- Bottom bar: combined kill-switch rails + halt-all button.
+     Halt-all click handler comes in a later commit; the button is
+     visible/clickable now so the layout is verifiable. -->
+<div class="bottombar" id="bottombar">
+  <div class="bb-left">
+    <div class="bb-rails" id="bbRails">
+      <span class="bb-rail rail-armed" data-rail="1">RAIL 1</span>
+      <span class="bb-rail rail-armed" data-rail="2">RAIL 2</span>
+      <span class="bb-rail rail-armed" data-rail="3">RAIL 3</span>
+      <span class="bb-rail rail-armed" data-rail="4">RAIL 4</span>
+      <span class="bb-rail rail-armed" data-rail="5">RAIL 5</span>
+    </div>
+  </div>
+  <div class="bb-right">
+    <button class="halt-all-btn" id="haltAllBtn" title="Pause both bots immediately">HALT ALL</button>
+  </div>
 </div>
 
 <!-- Sticky mobile emergency stop — always thumb-reachable -->

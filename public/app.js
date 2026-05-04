@@ -176,7 +176,10 @@ function fmtAge(sec) {
 
 // ─── Summary Renderer ──────────────────────────────────────
 async function loadSummary() {
-  const s = await api('/api/summary');
+  // Bachelier pane scoping: every existing widget on the right pane reads
+  // the bachelier bot's data only. Combined totals come from the new
+  // /api/combined_summary call (loadCombined).
+  const s = await api('/api/summary?bot_type=bachelier');
   window.__lastSummary = s;
   claudeSetStatus('loaded');
 
@@ -703,7 +706,7 @@ function liveAssets() {
 
 // ─── Per-asset WR ─────────────────────────────────────────
 async function loadAssets() {
-  const data = await api('/api/per_asset');
+  const data = await api('/api/per_asset?bot_type=bachelier');
   const container = $('assetList');
   if (!data.length) {
     container.innerHTML = '<div class="text-dim">no data yet</div>';
@@ -729,7 +732,7 @@ async function loadAssets() {
 
 // ─── WR by Timeframe ─────────────────────────────────────
 async function loadTimeframes() {
-  const data = await api('/api/wr_by_timeframe');
+  const data = await api('/api/wr_by_timeframe?bot_type=bachelier');
   const container = $('timeframeList');
   if (!data.length) { container.innerHTML = '<div class="text-dim">no data yet</div>'; return; }
   container.innerHTML = '';
@@ -749,7 +752,7 @@ async function loadTimeframes() {
 // ─── Hourly ─────────────────────────────────────────────
 let _hourlySort = 'hour';
 async function loadHourly() {
-  const data = await api('/api/hourly');
+  const data = await api('/api/hourly?bot_type=bachelier');
   const container = $('hourlyList');
   if (!data.length) { container.innerHTML = '<div class="text-dim">no data yet</div>'; return; }
   const filtered = data.filter(h => h.total >= 3);
@@ -781,7 +784,7 @@ async function loadLiveVsShadow() {
   const el = $('lvsBlock');
   if (!el) return;
   try {
-    const rows = await api('/api/trades?limit=500');
+    const rows = await api('/api/trades?limit=500&bot_type=bachelier');
     const start = rangeStartMs();
     const inRange = rows.filter(r => {
       const t = r.timestamp ? new Date(r.timestamp).getTime() : 0;
@@ -979,7 +982,7 @@ let _tradesFilter = { asset: '', dir: '', outcome: '', mode: '', strategy: '', c
 
 async function loadTrades() {
   const limit = Math.max(_tradesLimit, 50);
-  const raw = await api(`/api/trades?limit=${limit}`);
+  const raw = await api(`/api/trades?limit=${limit}&bot_type=bachelier`);
   _trades = raw;
   botReactToTrades(raw);
   populateFilterAssets(raw);
@@ -1239,7 +1242,7 @@ function drawSpark(svg, values, opts = {}) {
   `);
 }
 async function loadPnlChart() {
-  const raw = await api('/api/pnl_series?limit=500');
+  const raw = await api('/api/pnl_series?limit=500&bot_type=bachelier');
   const cutoff = rangeStartMs();
   const vals = raw.filter(d => new Date(d.ts).getTime() >= cutoff).map(d => d.cum_pnl);
   // If range has too few points, fall back to full series so the chart isn't blank.
@@ -1552,12 +1555,87 @@ function bindCapSlider() {
   });
 }
 
+// ─── Combined top-bar / pane-headers (two-pane layout) ─────
+// Pulls /api/combined_summary and updates: combined PnL hero, combined
+// bankroll, combined kill state, live indicator, both panes' meta
+// strips, and the bottom-bar rail pills.
+async function loadCombined() {
+  let data;
+  try { data = await api('/api/combined_summary'); }
+  catch (e) { if (e.message !== 'unauth') console.warn('combined err', e); return; }
+
+  const c = data.combined || {};
+  const copy = data.copy || {};
+  const bach = data.bachelier || {};
+
+  // Top bar — combined PnL (the headline).
+  const pnl = Number(c.pnl_today || 0);
+  const pnlEl = $('combinedPnl');
+  if (pnlEl) {
+    pnlEl.textContent = fmtUsd(pnl);
+    pnlEl.className = 'combined-pnl ' + (pnl > 0 ? 'pos' : pnl < 0 ? 'neg' : 'neutral');
+  }
+  // Combined bankroll: just sum of both bots' wallet readings, against $500
+  // total target. Shows '$--' if neither bot has reported a wallet yet.
+  const br = c.bankroll_usdc;
+  const brEl = $('combinedBankroll');
+  if (brEl) brEl.textContent = (br != null) ? `$${Number(br).toFixed(0)} / $500` : '$-- / $500';
+
+  // Combined kill state — single dot in top-bar status pill.
+  const kill = String(c.kill_state || 'green');
+  const killDot = $('combinedKillDot');
+  const killTxt = $('combinedKillTxt');
+  if (killDot) killDot.className = 'status-dot' + (kill === 'green' ? '' : ' offline');
+  if (killTxt) killTxt.textContent = kill === 'red' ? 'HALTED' : kill === 'amber' ? 'COOLING' : 'ARMED';
+
+  // live: yes/no — amber pill until LIVE_AUTHORIZED true on every configured bot.
+  const liveInd = $('liveIndicator');
+  const liveSt = $('liveState');
+  if (liveSt) liveSt.textContent = c.live_authorized ? 'yes' : 'no';
+  if (liveInd) liveInd.classList.toggle('is-live', !!c.live_authorized);
+
+  // Per-pane meta strips.
+  _writePaneMeta('copy', copy);
+  _writePaneMeta('bach', bach);
+
+  // Toggle the copy pane's empty-state.
+  const copyEmpty = $('copyEmpty');
+  if (copyEmpty) copyEmpty.style.display = copy.configured ? 'none' : 'block';
+
+  // Bottom-bar rail pills mirror the BACHELIER bot's killswitches list
+  // (bachelier owns the rails today; copy bot doesn't surface them).
+  const rails = (bach.killswitches && Array.isArray(bach.killswitches)) ? bach.killswitches : [];
+  const byId = new Map();
+  rails.forEach(h => byId.set(Number(h.rail_id), h));
+  document.querySelectorAll('.bb-rail').forEach(el => {
+    const id = Number(el.dataset.rail);
+    const halt = byId.get(id);
+    el.className = 'bb-rail ' + (halt ? (
+      String(halt.action || '').toLowerCase().includes('cool') ? 'rail-cooling' : 'rail-fired'
+    ) : 'rail-armed');
+  });
+}
+function _writePaneMeta(prefix, b) {
+  const cfg = !!b.configured;
+  const wb = $(`${prefix}Bankroll`);
+  const wpnl = $(`${prefix}PnlToday`);
+  const wopen = $(`${prefix === 'copy' ? 'copy' : 'bach'}Open`);
+  if (wb) wb.textContent = (b.wallet_usdc != null) ? `$${Number(b.wallet_usdc).toFixed(0)}` : '$--';
+  if (wpnl) {
+    const v = Number(b.pnl_today || 0);
+    wpnl.textContent = fmtUsd(v);
+    wpnl.className = 'meta-val ' + (v > 0 ? 'pos' : v < 0 ? 'neg' : '');
+  }
+  if (wopen) wopen.textContent = cfg ? String(b.open_positions || 0) : '--';
+}
+
 // ─── Refresh loop ────────────────────────────────────────
 async function refreshAll() {
   try {
     claudeSetStatus('loading');
     await loadSummary();
     await Promise.all([
+      loadCombined(),
       loadAssets(),
       loadTimeframes(),
       loadHourly(),

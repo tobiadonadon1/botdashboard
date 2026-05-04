@@ -1950,3 +1950,244 @@ th.sort-desc::after { content: '▼'; opacity: 0.8; color: var(--green-bright); 
   font-variant-numeric: tabular-nums;
 }
 .nm-breakdown { margin-top: 8px; font-size: 0.78rem; color: var(--text-dim); }
+
+/* ═══════════════════════════════════════════════════════════
+   TWO-PANE LAYOUT (copy bot left, bachelier signal bot right)
+   New top bar (combined-PnL hero), new bottom bar (rails + halt-all).
+   The existing .container is reused inside the bachelier pane via
+   .container-in-pane (overrides the page-level max-width / padding).
+   ═══════════════════════════════════════════════════════════ */
+
+/* --- Hide legacy nodes that app.js still writes to but the new layout
+       doesn't surface in the topbar. They stay in the DOM so the existing
+       loadSummary() function doesn't crash on missing #ids. --- */
+.legacy-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+/* --- New top bar: 3 columns (left | center hero | right). --- */
+.topbar.topbar-v2 {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 28px;
+}
+.topbar-v2 .tb-left { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.topbar-v2 .tb-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  min-width: 280px;
+}
+.topbar-v2 .tb-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: flex-end;
+  font-size: 0.78rem;
+  min-width: 0;
+}
+.combined-pnl-label {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.combined-pnl {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 2.2rem;
+  line-height: 1.1;
+  letter-spacing: 0.5px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.combined-pnl.pos { color: var(--green-bright); text-shadow: 0 0 8px var(--green-glow); }
+.combined-pnl.neg { color: var(--red); text-shadow: 0 0 8px rgba(204,72,88,0.18); }
+.combined-pnl.neutral { color: var(--text-dim); }
+.combined-bankroll-row {
+  display: flex; gap: 14px; align-items: center;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+.combined-bankroll {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+}
+.live-indicator {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid rgba(212, 170, 60, 0.45);
+  background: rgba(212, 170, 60, 0.08);
+  color: var(--amber);
+  border-radius: 100px;
+  font-size: 0.65rem;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+}
+.live-indicator .live-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--amber);
+}
+.live-indicator.is-live {
+  border-color: rgba(88, 181, 128, 0.55);
+  background: rgba(88, 181, 128, 0.10);
+  color: var(--green-bright);
+}
+.live-indicator.is-live .live-dot { background: var(--green-bright); }
+
+/* --- Two-pane container --- */
+.two-pane {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  /* Leave room for fixed bottom bar */
+  padding-bottom: 56px;
+  min-height: calc(100vh - 60px);
+}
+.pane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+.pane.pane-copy {
+  border-right: 1px solid var(--border);
+  background: rgba(8, 14, 18, 0.20);
+}
+.pane.pane-bachelier { background: transparent; }
+
+.pane-header {
+  position: sticky;
+  top: 60px;            /* below topbar */
+  z-index: 50;
+  padding: 14px 20px 10px;
+  background: rgba(9, 11, 16, 0.92);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+.pane-title {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.25em;
+  color: var(--green);
+  margin: 0 0 8px;
+  text-shadow: 0 0 6px var(--green-glow);
+}
+.pane-title .pane-subtitle {
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  color: var(--text-dim);
+  margin-left: 8px;
+  text-shadow: none;
+  font-weight: 500;
+}
+.pane-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-family: var(--mono);
+}
+.meta-item {
+  display: inline-flex; align-items: baseline; gap: 6px;
+  font-size: 0.78rem;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.meta-label {
+  font-size: 0.60rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.meta-val.pos { color: var(--green-bright); }
+.meta-val.neg { color: var(--red); }
+
+.pane-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 14px 18px 20px;
+}
+.container.container-in-pane {
+  max-width: none;
+  padding: 0;
+  margin: 0;
+}
+
+.pane-empty {
+  margin: 40px 12px;
+  padding: 28px 24px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  background: rgba(8, 14, 18, 0.45);
+  text-align: center;
+  font-family: var(--mono);
+}
+.pane-empty-title {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.pane-empty-sub {
+  font-size: 0.72rem;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+/* --- Bottom bar (fixed): rails + halt-all --- */
+.bottombar {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  z-index: 90;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 22px;
+  background: rgba(9, 11, 16, 0.95);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--border-strong);
+}
+.bb-rails {
+  display: flex; gap: 6px; flex-wrap: wrap;
+}
+.bb-rail {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 100px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+.bb-rail.rail-armed   { color: var(--green-dim);  border-color: rgba(88, 181, 128, 0.35); background: rgba(88, 181, 128, 0.05); }
+.bb-rail.rail-cooling { color: var(--amber);      border-color: rgba(212, 170, 60, 0.55); background: rgba(212, 170, 60, 0.10); }
+.bb-rail.rail-fired   { color: #ff7a85;            border-color: rgba(204, 72, 88, 0.65); background: rgba(204, 72, 88, 0.12); }
+.halt-all-btn {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  padding: 7px 18px;
+  border-radius: 4px;
+  border: 1px solid rgba(204, 72, 88, 0.7);
+  background: rgba(204, 72, 88, 0.16);
+  color: #ff7a85;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.halt-all-btn:hover {
+  background: rgba(204, 72, 88, 0.30);
+  box-shadow: 0 0 12px rgba(204, 72, 88, 0.30);
+}
