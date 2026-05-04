@@ -22,12 +22,14 @@ create table if not exists public.users (
 );
 
 -- ─────────────────────────────────────────────────────────────────
--- BOT STATUS — one upserted row per user, latest snapshot
+-- BOT STATUS — one upserted row per (user, bot_type), latest snapshot
 -- ─────────────────────────────────────────────────────────────────
 create table if not exists public.bot_status (
-  user_id        uuid        primary key references public.users(id) on delete cascade,
+  user_id        uuid        not null references public.users(id) on delete cascade,
+  bot_type       text        not null default 'bachelier',  -- 'copy' | 'bachelier'
   updated_at     timestamptz not null default now(),
-  status         jsonb       not null      -- {running, dry_run, scale_level, next_cycle_at, net_pnl, ...}
+  status         jsonb       not null,     -- {running, dry_run, scale_level, next_cycle_at, net_pnl, ...}
+  primary key (user_id, bot_type)
 );
 
 -- ─────────────────────────────────────────────────────────────────
@@ -59,6 +61,10 @@ create table if not exists public.trades (
   entry_bid             real,    -- bid price at entry
   exit_bid              real,    -- bid price at exit (NULL until resolved)
   realized_pnl_partial  real,    -- partial PNL realized via early scalp (subset of pnl)
+  -- Two-bot model: copy bot mirrors whale wallets, bachelier is the signal bot.
+  -- bot_type lives on every row so per-bot queries can index efficiently.
+  bot_type       text        not null default 'bachelier',  -- 'copy' | 'bachelier'
+  source_wallet  text,                                       -- copy-bot only: which whale this trade mirrors
   created_at     timestamptz not null default now(),
   unique (user_id, trade_id)
 );
@@ -71,9 +77,15 @@ create table if not exists public.trades (
 --   alter table public.trades add column if not exists entry_bid real;
 --   alter table public.trades add column if not exists exit_bid real;
 --   alter table public.trades add column if not exists realized_pnl_partial real;
+--   alter table public.trades add column if not exists bot_type text not null default 'bachelier';
+--   alter table public.trades add column if not exists source_wallet text;
 --   update public.trades set strategy_label = 'expiry_convergence' where strategy_label is null;
+--   update public.trades set bot_type = 'bachelier' where bot_type is null;
 --   create index if not exists trades_user_shadow_idx on public.trades (user_id, shadow);
 --   create index if not exists trades_user_strategy_idx on public.trades (user_id, strategy_label);
+--   create index if not exists trades_user_bot_idx on public.trades (user_id, bot_type);
+--   create index if not exists trades_user_bot_wallet_idx on public.trades (user_id, bot_type, source_wallet)
+--     where bot_type = 'copy';
 
 create index if not exists trades_user_ts_idx
   on public.trades (user_id, timestamp desc);
@@ -85,9 +97,20 @@ create index if not exists trades_user_shadow_idx
   on public.trades (user_id, shadow);
 create index if not exists trades_user_strategy_idx
   on public.trades (user_id, strategy_label);
+create index if not exists trades_user_bot_idx
+  on public.trades (user_id, bot_type);
+-- Partial index: per-wallet aggregates only matter for the copy bot, so
+-- skip the bachelier rows entirely. Significant when the bachelier bot
+-- generates 100x the row volume.
+create index if not exists trades_user_bot_wallet_idx
+  on public.trades (user_id, bot_type, source_wallet)
+  where bot_type = 'copy';
 
 -- ─────────────────────────────────────────────────────────────────
--- SIGNAL PERFORMANCE — per-user learning state
+-- SIGNAL PERFORMANCE — per-user learning state.
+-- Only the bachelier bot has signals; copy bot mirrors trades, no signals.
+-- bot_type column is additive but NOT in the PK — keeps the existing
+-- (user_id, asset, signal_name) namespace intact for upgrades.
 -- ─────────────────────────────────────────────────────────────────
 create table if not exists public.signal_performance (
   user_id        uuid        not null references public.users(id) on delete cascade,
@@ -97,20 +120,80 @@ create table if not exists public.signal_performance (
   times_correct  int         default 0,
   win_rate       numeric     default 0.5,
   weight         numeric     default 1.0,
+  bot_type       text        not null default 'bachelier',  -- 'copy' | 'bachelier'
   updated_at     timestamptz not null default now(),
   primary key (user_id, asset, signal_name)
 );
 
 -- ─────────────────────────────────────────────────────────────────
 -- BOT CONTROL — dashboard → bot commands (pause/start)
--- One row per user. Bot polls GET /api/bot/control every ~5s.
+-- One row per (user, bot_type). Each bot polls with its own bot_type
+-- header / param so the copy bot and bachelier bot can be paused independently.
 -- ─────────────────────────────────────────────────────────────────
 create table if not exists public.bot_control (
-  user_id        uuid        primary key references public.users(id) on delete cascade,
-  command        text        not null default 'start',   -- 'start' | 'pause'
+  user_id        uuid        not null references public.users(id) on delete cascade,
+  bot_type       text        not null default 'bachelier',  -- 'copy' | 'bachelier'
+  command        text        not null default 'start',      -- 'start' | 'pause'
   issued_at      timestamptz not null default now(),
-  issued_by      text
+  issued_by      text,
+  primary key (user_id, bot_type)
 );
+
+-- ─────────────────────────────────────────────────────────────────
+-- IDEMPOTENT UPGRADE: bot_type columns + composite PK changes
+-- Safe to run on a fresh DB (no-op) and on an existing DB (applies once).
+-- ─────────────────────────────────────────────────────────────────
+
+-- 1. bot_type columns (additive; default 'bachelier' so legacy rows backfill).
+alter table public.bot_status         add column if not exists bot_type text not null default 'bachelier';
+alter table public.bot_control        add column if not exists bot_type text not null default 'bachelier';
+alter table public.signal_performance add column if not exists bot_type text not null default 'bachelier';
+alter table public.trades             add column if not exists bot_type text not null default 'bachelier';
+alter table public.trades             add column if not exists source_wallet text;
+
+-- 2. Backfill explicit value into any rows that snuck in with NULL (defensive).
+update public.bot_status         set bot_type = 'bachelier' where bot_type is null;
+update public.bot_control        set bot_type = 'bachelier' where bot_type is null;
+update public.signal_performance set bot_type = 'bachelier' where bot_type is null;
+update public.trades             set bot_type = 'bachelier' where bot_type is null;
+
+-- 3. PK migration on bot_status: from (user_id) to (user_id, bot_type).
+-- Uses pg_constraint introspection so re-running is a no-op.
+do $$
+declare
+  pk_arity int;
+begin
+  select coalesce(array_length(conkey, 1), 0)
+    into pk_arity
+    from pg_constraint
+   where conrelid = 'public.bot_status'::regclass and contype = 'p';
+  if pk_arity = 1 then
+    alter table public.bot_status drop constraint bot_status_pkey;
+    alter table public.bot_status add primary key (user_id, bot_type);
+  end if;
+end $$;
+
+-- 4. Same migration on bot_control.
+do $$
+declare
+  pk_arity int;
+begin
+  select coalesce(array_length(conkey, 1), 0)
+    into pk_arity
+    from pg_constraint
+   where conrelid = 'public.bot_control'::regclass and contype = 'p';
+  if pk_arity = 1 then
+    alter table public.bot_control drop constraint bot_control_pkey;
+    alter table public.bot_control add primary key (user_id, bot_type);
+  end if;
+end $$;
+
+-- 5. Indexes on the new column for trades (idempotent).
+create index if not exists trades_user_bot_idx
+  on public.trades (user_id, bot_type);
+create index if not exists trades_user_bot_wallet_idx
+  on public.trades (user_id, bot_type, source_wallet)
+  where bot_type = 'copy';
 
 -- ─────────────────────────────────────────────────────────────────
 -- ROW-LEVEL SECURITY
