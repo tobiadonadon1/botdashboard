@@ -1059,9 +1059,18 @@ async def bot_push(
     if kind == "trade":
         rows = data if isinstance(data, list) else [data]
         payload = []
+        # Server-side default for `timestamp` so a payload that omits it
+        # doesn't blow up against the NOT NULL constraint. Used per row only
+        # if the bot didn't send one.
+        _now_iso = datetime.now(timezone.utc).isoformat()
         for r in rows:
             if not r.get("trade_id"):
                 raise HTTPException(status_code=400, detail="trade.data.trade_id required")
+            # Timestamp: schema requires NOT NULL. Bot CAN send 'timestamp' or
+            # 'submitted_at_utc' (v2 spec has both); we fall through them and
+            # stamp NOW as a last resort. Same for submitted_at_utc.
+            ts = r.get("timestamp") or r.get("submitted_at_utc") or _now_iso
+            sub_ts = r.get("submitted_at_utc") or r.get("timestamp") or _now_iso
             # Strategy label: known values are expiry_convergence, early_entry,
             # scalp_exit. Null/missing/unknown falls back to expiry_convergence.
             # Keeps older bot builds (pre-strategy-split) compatible.
@@ -1081,7 +1090,7 @@ async def bot_push(
             payload.append({
                 "user_id": uid,
                 "trade_id": str(r["trade_id"]),
-                "timestamp": r.get("timestamp"),
+                "timestamp": ts,
                 # ── legacy bachelier fields (NULL on copy-bot trades) ──
                 "asset": r.get("asset"),
                 "direction": r.get("direction"),
@@ -1116,7 +1125,7 @@ async def bot_push(
                 "intended_price": r.get("intended_price"),
                 "executed_price": r.get("executed_price"),
                 "realized_pnl_usd": r.get("realized_pnl_usd"),
-                "submitted_at_utc": r.get("submitted_at_utc"),
+                "submitted_at_utc": sub_ts,
                 "latency_ms": r.get("latency_ms"),
                 "bot_type": bt,
             })
