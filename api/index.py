@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 from zoneinfo import ZoneInfo
 
@@ -381,6 +381,244 @@ async def wallet(polybot_session: Optional[str] = Cookie(None)):
             fetched_ts or _time.time(), tz=timezone.utc,
         ).isoformat() if bal is not None else None,
     }
+
+
+# ─────────────────────────────────────────────────────────
+# COPY-BOT v2 endpoints — feed the /copy.html page.
+# All scoped to the authenticated session's user_id, copy-bot rows only.
+# ─────────────────────────────────────────────────────────
+
+def _copy_trade_filter(uid: str) -> Dict[str, str]:
+    """PostgREST filter: this user's COPY-bot trades only.
+    Excludes bachelier rows (strategy_label='expiry_convergence' and friends)."""
+    return {"user_id": f"eq.{uid}", "bot_type": "eq.copy"}
+
+
+def _utc_midnight() -> datetime:
+    """Today's midnight in UTC (matches the bot's daily PnL anchor convention)."""
+    now = datetime.now(timezone.utc)
+    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+@app.get("/api/copy_summary")
+async def copy_summary(
+    response: Response,
+    polybot_session: Optional[str] = Cookie(None),
+):
+    """Top-bar numbers: bankroll, cash, in-trades, today PnL, KS state.
+    Reads bot_status for the bankroll/cash/exposure (heartbeat-driven) and
+    derives today_pnl from copy-bot CLOSE rows since UTC midnight."""
+    response.headers["Cache-Control"] = "no-store"
+    sess = require_session(polybot_session)
+    uid = sess["user_id"]
+    s = db()
+
+    # Status row (the v2 bot pushes hourly with bankroll_usd, cash_usd, etc.)
+    status_rows = s.select("bot_status", filters={"user_id": f"eq.{uid}"}, limit=1)
+    status = status_rows[0]["status"] if status_rows else {}
+    status_updated_at = status_rows[0]["updated_at"] if status_rows else None
+
+    # Heartbeat freshness — bot pushes status hourly; >90 min = stale.
+    age_sec: Optional[int] = None
+    if status_updated_at:
+        try:
+            ts = datetime.fromisoformat(str(status_updated_at).replace("Z", "+00:00"))
+            age_sec = int((datetime.now(timezone.utc) - ts).total_seconds())
+        except Exception:
+            pass
+    fresh = age_sec is not None and age_sec < 5400  # 90 min
+
+    # Today's PnL: sum realized_pnl_usd over CLOSE rows since UTC midnight.
+    # Falls back to existing `pnl` column if realized_pnl_usd missing.
+    midnight = _utc_midnight()
+    try:
+        rows = s.select(
+            "trades",
+            columns="action,realized_pnl_usd,pnl,timestamp,is_shadow,shadow",
+            filters={**_copy_trade_filter(uid), "timestamp": f"gte.{midnight.isoformat()}"},
+            limit=2000,
+        )
+    except Exception:
+        # Pre-migration: no bot_type / realized_pnl_usd columns. Treat as no data.
+        rows = []
+    today_pnl = 0.0
+    n_closes_today = 0
+    for r in rows:
+        # Only count live (non-shadow) closes against today's PnL.
+        is_shadow = bool(r.get("shadow")) or bool(r.get("is_shadow"))
+        if is_shadow:
+            continue
+        action = str(r.get("action") or "").upper()
+        if action != "CLOSE":
+            continue
+        v = r.get("realized_pnl_usd")
+        if v is None:
+            v = r.get("pnl")
+        try:
+            today_pnl += float(v or 0)
+            n_closes_today += 1
+        except (TypeError, ValueError):
+            pass
+
+    return {
+        "bankroll_usd":       status.get("bankroll_usd"),
+        "cash_usd":           status.get("cash_usd"),
+        "live_exposure_usd":  status.get("live_exposure_usd"),
+        "open_positions_n":   status.get("open_positions_n"),
+        "today_pnl_usd":      today_pnl,
+        "n_closes_today":     n_closes_today,
+        "daily_cap_usd":      status.get("daily_cap_usd"),
+        "daily_cap_remaining_usd": status.get("daily_cap_remaining_usd"),
+        "ks_status":          status.get("ks_status") or "green",
+        "live_authorized":    bool(status.get("live_authorized")),
+        "n_paused_wallets":   status.get("n_paused_wallets"),
+        "n_wallets_with_activity": status.get("n_wallets_with_activity"),
+        "n_wallets_total":    status.get("n_wallets_total"),
+        "heartbeat": {
+            "age_sec":    age_sec,
+            "is_fresh":   fresh,
+            "updated_at": status_updated_at,
+        },
+        "now_utc": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/copy_open")
+async def copy_open(polybot_session: Optional[str] = Cookie(None)):
+    """Open live positions, grouped by condition_id (one row per market).
+    Sums shares + cost across the OPEN fills minus any partial CLOSE fills
+    for the same condition_id."""
+    sess = require_session(polybot_session)
+    uid = sess["user_id"]
+    s = db()
+    # Pull recent live (non-shadow) copy fills. 30 days is comfortably wider
+    # than any expected open-position lifespan for prediction markets.
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+    try:
+        rows = s.select(
+            "trades",
+            columns="trade_id,timestamp,wallet_label,wallet_address,asset_label,market_slug,condition_id,token_id,side,action,amount_usd,intended_price,executed_price,shares,realized_pnl_usd,is_shadow,shadow",
+            filters={**_copy_trade_filter(uid), "timestamp": f"gte.{cutoff}"},
+            order="timestamp.asc",
+            limit=10000,
+        )
+    except Exception:
+        # Pre-migration: columns don't exist. Empty.
+        return {"positions": [], "now_utc": datetime.now(timezone.utc).isoformat()}
+
+    # Group by condition_id, accumulate net shares + cost basis. Skip shadow rows.
+    pos: Dict[str, Dict] = {}
+    for r in rows:
+        if bool(r.get("shadow")) or bool(r.get("is_shadow")):
+            continue
+        cid = r.get("condition_id")
+        if not cid:
+            continue
+        action = str(r.get("action") or "").upper()
+        side = str(r.get("side") or "").upper()
+        shares = float(r.get("shares") or 0)
+        # Use executed_price when present (live fills), fall back to intended.
+        px_raw = r.get("executed_price")
+        if px_raw is None:
+            px_raw = r.get("intended_price")
+        try:
+            px = float(px_raw) if px_raw is not None else None
+        except (TypeError, ValueError):
+            px = None
+        amt = float(r.get("amount_usd") or 0)
+        wallets = set()
+        wallets.add(r.get("wallet_label") or r.get("wallet_address") or "?")
+        b = pos.setdefault(cid, {
+            "condition_id": cid,
+            "asset_label":  r.get("asset_label") or r.get("market_slug") or cid[:12],
+            "market_slug":  r.get("market_slug"),
+            "token_id":     r.get("token_id"),
+            "side":         side,
+            "wallets":      set(),
+            "net_shares":   0.0,
+            "cost_basis":   0.0,
+            "n_fills":      0,
+            "first_ts":     r.get("timestamp"),
+            "last_ts":      r.get("timestamp"),
+            "realized_so_far": 0.0,
+        })
+        b["wallets"].update(wallets)
+        b["last_ts"] = r.get("timestamp") or b["last_ts"]
+        b["n_fills"] += 1
+        if action == "OPEN":
+            b["net_shares"] += shares
+            b["cost_basis"] += amt if amt else (shares * (px or 0))
+        elif action == "CLOSE":
+            b["net_shares"] -= shares
+            # Reduce cost basis proportionally if we know per-share cost.
+            try:
+                b["realized_so_far"] += float(r.get("realized_pnl_usd") or 0)
+            except (TypeError, ValueError):
+                pass
+
+    # Filter to actually-open (net_shares > tiny epsilon) and shape for response.
+    out = []
+    for cid, b in pos.items():
+        if b["net_shares"] <= 1e-6:
+            continue
+        avg_entry = (b["cost_basis"] / b["net_shares"]) if b["net_shares"] > 0 else None
+        out.append({
+            "condition_id": cid,
+            "asset_label":  b["asset_label"],
+            "market_slug":  b["market_slug"],
+            "token_id":     b["token_id"],
+            "side":         b["side"],
+            "wallets":      sorted(w for w in b["wallets"] if w),
+            "shares":       round(b["net_shares"], 4),
+            "cost_basis":   round(b["cost_basis"], 2),
+            "avg_entry":    round(avg_entry, 4) if avg_entry is not None else None,
+            "n_fills":      b["n_fills"],
+            "first_ts":     b["first_ts"],
+            "last_ts":      b["last_ts"],
+            "realized_partial": round(b["realized_so_far"], 2),
+        })
+    out.sort(key=lambda p: p["last_ts"] or "", reverse=True)
+    return {"positions": out, "now_utc": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/copy_activity")
+async def copy_activity(
+    limit: int = 20,
+    polybot_session: Optional[str] = Cookie(None),
+):
+    """Recent copy-bot activity (last N events). One row per fill.
+    Sorted newest-first."""
+    sess = require_session(polybot_session)
+    uid = sess["user_id"]
+    s = db()
+    try:
+        rows = s.select(
+            "trades",
+            columns="trade_id,timestamp,wallet_label,wallet_address,asset_label,market_slug,condition_id,side,action,amount_usd,executed_price,intended_price,shares,realized_pnl_usd,is_shadow,shadow,latency_ms",
+            filters=_copy_trade_filter(uid),
+            order="timestamp.desc",
+            limit=int(limit),
+        )
+    except Exception:
+        return {"events": [], "now_utc": datetime.now(timezone.utc).isoformat()}
+    out = []
+    for r in rows:
+        is_shadow = bool(r.get("shadow")) or bool(r.get("is_shadow"))
+        out.append({
+            "trade_id":     r.get("trade_id"),
+            "timestamp":    r.get("timestamp"),
+            "wallet":       r.get("wallet_label") or r.get("wallet_address"),
+            "asset_label":  r.get("asset_label") or r.get("market_slug"),
+            "side":         r.get("side"),
+            "action":       r.get("action"),
+            "amount_usd":   r.get("amount_usd"),
+            "price":        r.get("executed_price") if r.get("executed_price") is not None else r.get("intended_price"),
+            "shares":       r.get("shares"),
+            "realized_pnl_usd": r.get("realized_pnl_usd"),
+            "is_shadow":    is_shadow,
+            "latency_ms":   r.get("latency_ms"),
+        })
+    return {"events": out, "now_utc": datetime.now(timezone.utc).isoformat()}
 
 
 @app.get("/api/trades")
