@@ -63,7 +63,29 @@ create table if not exists public.trades (
   unique (user_id, trade_id)
 );
 
--- If upgrading an existing table:
+-- ─────────────────────────────────────────────────────────────────
+-- COPY-BOT v2 columns (additive). Captured from /api/bot/push payload.
+-- All nullable so the bachelier bot's existing payload keeps working.
+-- ─────────────────────────────────────────────────────────────────
+alter table public.trades add column if not exists wallet_address    text;
+alter table public.trades add column if not exists wallet_label      text;
+alter table public.trades add column if not exists asset_label       text;     -- "Cavaliers vs. Pistons"
+alter table public.trades add column if not exists market_slug       text;     -- "nba-cle-det-2026-05-05"
+alter table public.trades add column if not exists condition_id      text;     -- groups OPEN+CLOSE per market
+alter table public.trades add column if not exists token_id          text;     -- outcome side
+alter table public.trades add column if not exists action            text;     -- 'OPEN' | 'CLOSE'
+alter table public.trades add column if not exists side              text;     -- 'BUY' | 'SELL'
+alter table public.trades add column if not exists amount_usd        numeric;  -- v2 size; old rows use size_usd
+alter table public.trades add column if not exists intended_price    real;
+alter table public.trades add column if not exists executed_price    real;     -- NULL on shadow
+alter table public.trades add column if not exists realized_pnl_usd  numeric;  -- only on CLOSE rows
+alter table public.trades add column if not exists submitted_at_utc  timestamptz;
+alter table public.trades add column if not exists latency_ms        int;
+alter table public.trades add column if not exists bot_type          text default 'bachelier';
+-- Note: is_shadow is intentionally NOT added. Handler maps payload's is_shadow
+-- onto the existing `shadow` boolean column so reads stay consistent.
+
+-- If upgrading an existing table (older migrations, kept for reference):
 --   alter table public.trades add column if not exists mode text;
 --   alter table public.trades add column if not exists shadow boolean default false;
 --   alter table public.trades add column if not exists strategy_label text default 'expiry_convergence';
@@ -72,8 +94,6 @@ create table if not exists public.trades (
 --   alter table public.trades add column if not exists exit_bid real;
 --   alter table public.trades add column if not exists realized_pnl_partial real;
 --   update public.trades set strategy_label = 'expiry_convergence' where strategy_label is null;
---   create index if not exists trades_user_shadow_idx on public.trades (user_id, shadow);
---   create index if not exists trades_user_strategy_idx on public.trades (user_id, strategy_label);
 
 create index if not exists trades_user_ts_idx
   on public.trades (user_id, timestamp desc);
@@ -85,6 +105,11 @@ create index if not exists trades_user_shadow_idx
   on public.trades (user_id, shadow);
 create index if not exists trades_user_strategy_idx
   on public.trades (user_id, strategy_label);
+create index if not exists trades_user_bot_idx
+  on public.trades (user_id, bot_type);
+-- Per-condition lookup for "group fills by market" in /api/copy_open.
+create index if not exists trades_user_cond_idx
+  on public.trades (user_id, condition_id) where condition_id is not null;
 
 -- ─────────────────────────────────────────────────────────────────
 -- SIGNAL PERFORMANCE — per-user learning state

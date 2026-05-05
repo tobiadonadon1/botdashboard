@@ -831,10 +831,20 @@ async def bot_push(
             strat = str(raw_strat).strip() if raw_strat else "expiry_convergence"
             if strat not in ("expiry_convergence", "early_entry", "scalp_exit"):
                 strat = "expiry_convergence"
+            # bot_type: 'copy' or 'bachelier'. Defaults to bachelier so legacy
+            # bot builds keep working unchanged.
+            raw_bt = r.get("bot_type")
+            bt = str(raw_bt).strip().lower() if raw_bt else "bachelier"
+            if bt not in ("copy", "bachelier"):
+                bt = "bachelier"
+            # is_shadow folds into the existing `shadow` boolean column. Bot
+            # may send either name; we honor whichever it sends.
+            shadow_val = bool(r.get("is_shadow", r.get("shadow", False)))
             payload.append({
                 "user_id": uid,
                 "trade_id": str(r["trade_id"]),
                 "timestamp": r.get("timestamp"),
+                # ── legacy bachelier fields (NULL on copy-bot trades) ──
                 "asset": r.get("asset"),
                 "direction": r.get("direction"),
                 "entry_price": r.get("entry_price"),
@@ -848,48 +858,83 @@ async def bot_push(
                 "end_time": r.get("end_time"),
                 "timeframe": r.get("timeframe", "5m"),
                 "mode": r.get("mode"),
-                "shadow": bool(r.get("shadow", False)),
+                "shadow": shadow_val,
                 "strategy_label": strat,
-                # scalp_exit telemetry. Stored on every row but only meaningful
-                # for scalp_exit; NULL on core/early. No server-side validation
-                # of exit_trigger string - bot is the source of truth.
+                # ── scalp_exit telemetry (bachelier only, NULL on copy) ──
                 "exit_trigger": r.get("exit_trigger"),
                 "entry_bid": r.get("entry_bid"),
                 "exit_bid": r.get("exit_bid"),
                 "realized_pnl_partial": r.get("realized_pnl_partial"),
+                # ── copy-bot v2 fields (NULL on bachelier trades) ──
+                "wallet_address": r.get("wallet_address"),
+                "wallet_label": r.get("wallet_label"),
+                "asset_label": r.get("asset_label"),
+                "market_slug": r.get("market_slug"),
+                "condition_id": r.get("condition_id"),
+                "token_id": r.get("token_id"),
+                "action": r.get("action"),
+                "side": r.get("side"),
+                "amount_usd": r.get("amount_usd"),
+                "intended_price": r.get("intended_price"),
+                "executed_price": r.get("executed_price"),
+                "realized_pnl_usd": r.get("realized_pnl_usd"),
+                "submitted_at_utc": r.get("submitted_at_utc"),
+                "latency_ms": r.get("latency_ms"),
+                "bot_type": bt,
             })
         try:
             s.upsert("trades", payload, on_conflict="user_id,trade_id")
         except Exception:
-            # Cascading retry - drop newest optional columns first, fall back to
-            # progressively older shapes if the DB hasn't been migrated yet.
-            # Layer 0 = scalp_exit telemetry (4 cols added together).
+            # Cascading retry — drop newest column groups first so the bot's
+            # pushes still succeed (with degraded data) on a DB that hasn't
+            # been migrated yet.
+            # Layer 0: copy-bot v2 columns (newest, added in this commit).
+            v2_cols = ("wallet_address","wallet_label","asset_label","market_slug",
+                       "condition_id","token_id","action","side","amount_usd",
+                       "intended_price","executed_price","realized_pnl_usd",
+                       "submitted_at_utc","latency_ms","bot_type")
             for p in payload:
-                p.pop("exit_trigger", None)
-                p.pop("entry_bid", None)
-                p.pop("exit_bid", None)
-                p.pop("realized_pnl_partial", None)
+                for c in v2_cols:
+                    p.pop(c, None)
             try:
                 s.upsert("trades", payload, on_conflict="user_id,trade_id")
             except Exception:
+                # Layer 1: scalp_exit telemetry.
                 for p in payload:
-                    p.pop("strategy_label", None)
+                    p.pop("exit_trigger", None)
+                    p.pop("entry_bid", None)
+                    p.pop("exit_bid", None)
+                    p.pop("realized_pnl_partial", None)
                 try:
                     s.upsert("trades", payload, on_conflict="user_id,trade_id")
                 except Exception:
                     for p in payload:
-                        p.pop("shadow", None)
+                        p.pop("strategy_label", None)
                     try:
                         s.upsert("trades", payload, on_conflict="user_id,trade_id")
                     except Exception:
                         for p in payload:
-                            p.pop("mode", None)
+                            p.pop("shadow", None)
                         try:
                             s.upsert("trades", payload, on_conflict="user_id,trade_id")
                         except Exception:
                             for p in payload:
-                                p.pop("timeframe", None)
-                            s.upsert("trades", payload, on_conflict="user_id,trade_id")
+                                p.pop("mode", None)
+                            try:
+                                s.upsert("trades", payload, on_conflict="user_id,trade_id")
+                            except Exception:
+                                for p in payload:
+                                    p.pop("timeframe", None)
+                                try:
+                                    s.upsert("trades", payload, on_conflict="user_id,trade_id")
+                                except Exception as final_exc:
+                                    # All fallback layers exhausted. Surface the
+                                    # error so the bot operator can see WHY
+                                    # instead of just a generic 500.
+                                    raise HTTPException(
+                                        status_code=500,
+                                        detail=f"trade upsert failed after all fallbacks: {str(final_exc)[:300]}",
+                                    )
         return {"ok": True, "type": "trade", "count": len(payload)}
 
     if kind == "signal":
