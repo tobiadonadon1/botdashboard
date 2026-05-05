@@ -1129,60 +1129,49 @@ async def bot_push(
                 "latency_ms": r.get("latency_ms"),
                 "bot_type": bt,
             })
-        try:
-            s.upsert("trades", payload, on_conflict="user_id,trade_id")
-        except Exception:
-            # Cascading retry — drop newest column groups first so the bot's
-            # pushes still succeed (with degraded data) on a DB that hasn't
-            # been migrated yet.
-            # Layer 0: copy-bot v2 columns (newest, added in this commit).
-            v2_cols = ("wallet_address","wallet_label","asset_label","market_slug",
-                       "condition_id","token_id","action","side","amount_usd",
-                       "intended_price","executed_price","realized_pnl_usd",
-                       "submitted_at_utc","latency_ms","bot_type")
-            for p in payload:
-                for c in v2_cols:
-                    p.pop(c, None)
+        # Smart fallback: parse the PostgREST error to find the SPECIFIC
+        # column the DB doesn't have, drop just that one, retry. Stops the
+        # old "drop a whole group on every failure" behaviour, which was
+        # silently nuking v2 fields whenever an unrelated column (e.g.
+        # `timeframe`) was missing.
+        import re as _re
+        _col_err = _re.compile(
+            r"(?:column [\w\.]*?\.?(\w+) (?:does not exist|of '\w+' in the schema cache))|"
+            r"(?:Could not find the '(\w+)' column)",
+            _re.IGNORECASE,
+        )
+        max_retries = 25  # bounded - never infinite-loop on an unreadable error
+        last_exc: Optional[Exception] = None
+        dropped: List[str] = []
+        for _ in range(max_retries):
             try:
                 s.upsert("trades", payload, on_conflict="user_id,trade_id")
-            except Exception:
-                # Layer 1: scalp_exit telemetry.
+                last_exc = None
+                break
+            except Exception as exc:
+                last_exc = exc
+                msg = str(exc)
+                m = _col_err.search(msg)
+                col = (m.group(1) or m.group(2)) if m else None
+                if not col:
+                    # Error isn't about a missing column - can't fix by dropping.
+                    break
+                # Don't drop columns the schema requires (would 500 anyway).
+                if col in ("user_id", "trade_id", "timestamp"):
+                    break
+                # Already dropped this column? Bail to avoid an infinite loop.
+                if col in dropped:
+                    break
+                dropped.append(col)
                 for p in payload:
-                    p.pop("exit_trigger", None)
-                    p.pop("entry_bid", None)
-                    p.pop("exit_bid", None)
-                    p.pop("realized_pnl_partial", None)
-                try:
-                    s.upsert("trades", payload, on_conflict="user_id,trade_id")
-                except Exception:
-                    for p in payload:
-                        p.pop("strategy_label", None)
-                    try:
-                        s.upsert("trades", payload, on_conflict="user_id,trade_id")
-                    except Exception:
-                        for p in payload:
-                            p.pop("shadow", None)
-                        try:
-                            s.upsert("trades", payload, on_conflict="user_id,trade_id")
-                        except Exception:
-                            for p in payload:
-                                p.pop("mode", None)
-                            try:
-                                s.upsert("trades", payload, on_conflict="user_id,trade_id")
-                            except Exception:
-                                for p in payload:
-                                    p.pop("timeframe", None)
-                                try:
-                                    s.upsert("trades", payload, on_conflict="user_id,trade_id")
-                                except Exception as final_exc:
-                                    # All fallback layers exhausted. Surface the
-                                    # error so the bot operator can see WHY
-                                    # instead of just a generic 500.
-                                    raise HTTPException(
-                                        status_code=500,
-                                        detail=f"trade upsert failed after all fallbacks: {str(final_exc)[:300]}",
-                                    )
-        return {"ok": True, "type": "trade", "count": len(payload)}
+                    p.pop(col, None)
+        if last_exc is not None:
+            # Surface the actual SQL error + which columns we dropped.
+            raise HTTPException(
+                status_code=500,
+                detail=f"trade upsert failed (dropped={dropped}): {str(last_exc)[:300]}",
+            )
+        return {"ok": True, "type": "trade", "count": len(payload), "dropped_cols": dropped}
 
     if kind == "signal":
         rows = data if isinstance(data, list) else [data]
