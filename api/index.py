@@ -1078,12 +1078,22 @@ async def bot_push(
             strat = str(raw_strat).strip() if raw_strat else "expiry_convergence"
             if strat not in ("expiry_convergence", "early_entry", "scalp_exit"):
                 strat = "expiry_convergence"
-            # bot_type: 'copy' or 'bachelier'. Defaults to bachelier so legacy
-            # bot builds keep working unchanged.
-            raw_bt = r.get("bot_type")
-            bt = str(raw_bt).strip().lower() if raw_bt else "bachelier"
+            # bot_type: 'copy' or 'bachelier'. Look in three places:
+            #   1. data.bot_type (per-row, takes precedence)
+            #   2. envelope-level body.bot_type (single value for whole batch)
+            #   3. INFER from v2-field presence — if the row has wallet_label /
+            #      condition_id / action / wallet_address / asset_label, it's a
+            #      copy-bot trade by structure even if the field wasn't sent.
+            #      This catches bots that forget to set bot_type but still send
+            #      the rest of the v2 payload.
+            raw_bt = r.get("bot_type") or body.get("bot_type")
+            bt = str(raw_bt).strip().lower() if raw_bt else None
             if bt not in ("copy", "bachelier"):
-                bt = "bachelier"
+                # Infer from shape: any of these fields existing = copy bot.
+                v2_signal = any(r.get(k) for k in
+                                ("wallet_label", "wallet_address", "condition_id",
+                                 "asset_label", "market_slug", "action"))
+                bt = "copy" if v2_signal else "bachelier"
             # is_shadow folds into the existing `shadow` boolean column. Bot
             # may send either name; we honor whichever it sends.
             shadow_val = bool(r.get("is_shadow", r.get("shadow", False)))
