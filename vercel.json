@@ -2,6 +2,7 @@
   "framework": null,
   "rewrites": [
     { "source": "/login", "destination": "/login.html" },
+    { "source": "/copy",  "destination": "/copy.html"  },
     { "source": "/api/:path*", "destination": "/api/index.py" }
   ]
 }

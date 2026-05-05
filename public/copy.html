@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>POLYBOT // COPY MIRROR</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="stylesheet" href="/styles.css">
+<style>
+/* ─── Copy-mirror page (lean, single-purpose) ────────────── */
+body.copy-page {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--mono);
+  padding: 0;
+  margin: 0;
+}
+.cp-bar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 16px;
+  background: rgba(9, 11, 16, 0.95);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78rem;
+}
+.cp-bar a { color: var(--text-dim); text-decoration: none; letter-spacing: 0.10em; }
+.cp-bar a:hover { color: var(--green); }
+.cp-bar .cp-logo {
+  font-weight: 700; letter-spacing: 0.20em; color: var(--green);
+  text-shadow: 0 0 6px var(--green-glow);
+}
+.cp-bar .cp-stale {
+  font-size: 0.66rem; letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+.cp-bar .cp-stale.stale { color: var(--amber); }
+.cp-bar .cp-stale.fresh { color: var(--green); }
+
+main.cp { padding: 16px; max-width: 1200px; margin: 0 auto; }
+
+/* Top stats — the answer to "am I making money today?" */
+.cp-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.cp-stat {
+  border: 1px solid var(--border);
+  background: var(--bg-glass);
+  border-radius: 4px;
+  padding: 12px 14px;
+}
+.cp-stat .lbl {
+  font-size: 0.60rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+.cp-stat .val {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 1.6rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  letter-spacing: 0.5px;
+  line-height: 1.1;
+}
+.cp-stat .val.pos { color: var(--green-bright); text-shadow: 0 0 6px var(--green-glow); }
+.cp-stat .val.neg { color: var(--red); }
+.cp-stat .val.dim { color: var(--text-dim); }
+.cp-stat .sub {
+  margin-top: 4px;
+  font-size: 0.66rem;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+
+/* Status strip (live / KS / cap / wallets) */
+.cp-strip {
+  display: flex; gap: 12px; flex-wrap: wrap;
+  margin-bottom: 18px;
+  font-size: 0.74rem;
+  font-family: var(--mono);
+  align-items: center;
+}
+.cp-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 100px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  font-size: 0.66rem;
+}
+.cp-pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); }
+.cp-pill.green { color: var(--green-bright); border-color: rgba(88,181,128,0.55); }
+.cp-pill.green .dot { background: var(--green-bright); box-shadow: 0 0 4px var(--green-bright); }
+.cp-pill.amber { color: var(--amber); border-color: rgba(212,170,60,0.55); }
+.cp-pill.amber .dot { background: var(--amber); box-shadow: 0 0 4px var(--amber); }
+.cp-pill.red   { color: #ff7a85; border-color: rgba(204,72,88,0.65); }
+.cp-pill.red .dot   { background: #ff7a85; box-shadow: 0 0 4px #ff7a85; }
+.cp-meta { color: var(--text-dim); }
+
+/* Section titles */
+.cp-section { margin-top: 18px; }
+.cp-section h2 {
+  font-family: var(--mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 0 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* Open positions table */
+.cp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+.cp-table th {
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 0.60rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  font-weight: 500;
+}
+.cp-table td {
+  padding: 8px 8px;
+  border-bottom: 1px solid rgba(78, 148, 108, 0.04);
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  vertical-align: top;
+}
+.cp-table .num { text-align: right; }
+.cp-table .pos { color: var(--green-bright); }
+.cp-table .neg { color: var(--red); }
+.cp-table .dim { color: var(--text-dim); }
+.cp-table .market {
+  font-weight: 500;
+  color: var(--text);
+  display: block;
+  margin-bottom: 2px;
+}
+.cp-table .market-sub {
+  font-size: 0.62rem;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+.cp-table .wallets {
+  font-size: 0.66rem;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+}
+.cp-table .side-buy  { color: var(--green-bright); }
+.cp-table .side-sell { color: var(--amber); }
+
+/* Activity feed */
+.cp-activity {
+  list-style: none; margin: 0; padding: 0;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+}
+.cp-activity li {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(78, 148, 108, 0.04);
+  align-items: baseline;
+}
+.cp-activity .a-time { color: var(--text-dim); font-size: 0.66rem; min-width: 56px; }
+.cp-activity .a-action {
+  font-size: 0.58rem; padding: 1px 6px; border-radius: 2px;
+  letter-spacing: 0.10em; text-transform: uppercase; font-weight: 600;
+}
+.cp-activity .a-action.OPEN  { background: rgba(91,168,200,0.14); color: var(--blue); border: 1px solid rgba(91,168,200,0.45); }
+.cp-activity .a-action.CLOSE { background: rgba(155,123,212,0.14); color: #b59ce5; border: 1px solid rgba(155,123,212,0.45); }
+.cp-activity .a-msg { color: var(--text); }
+.cp-activity .a-sub { color: var(--text-dim); font-size: 0.66rem; margin-left: 4px; }
+.cp-activity .a-pnl {
+  font-variant-numeric: tabular-nums; text-align: right; min-width: 72px;
+}
+.cp-activity .a-pnl.pos { color: var(--green-bright); }
+.cp-activity .a-pnl.neg { color: var(--red); }
+.cp-activity .a-pnl.dim { color: var(--text-dim); }
+.cp-activity li.shadow .a-msg,
+.cp-activity li.shadow .a-pnl { opacity: 0.5; }
+.cp-activity li.shadow .a-msg::after { content: ' · shadow'; color: var(--blue); font-size: 0.62rem; }
+
+.cp-empty {
+  padding: 24px; text-align: center;
+  color: var(--text-dim); font-size: 0.78rem;
+  border: 1px dashed var(--border-strong); border-radius: 4px;
+}
+
+/* Mobile: stack stats 2x2, condense everything else */
+@media (max-width: 700px) {
+  .cp-stats { grid-template-columns: 1fr 1fr; }
+  .cp-stat .val { font-size: 1.4rem; }
+  main.cp { padding: 12px; }
+}
+@media (max-width: 480px) {
+  .cp-stats { grid-template-columns: 1fr 1fr; gap: 6px; }
+  .cp-stat { padding: 10px 12px; }
+  .cp-stat .val { font-size: 1.25rem; }
+  /* Hide the wallets column on the table to give the market more room */
+  .cp-table th:nth-child(2),
+  .cp-table td:nth-child(2) { display: none; }
+}
+</style>
+</head>
+<body class="copy-page">
+
+<div class="cp-bar">
+  <span class="cp-logo">POLYBOT // COPY</span>
+  <span class="cp-stale" id="cpStale">--</span>
+  <span><a href="/" title="Bachelier dashboard">bachelier ↗</a> &nbsp; <a href="#" id="cpLogout">logout</a></span>
+</div>
+
+<main class="cp">
+
+  <!-- Top: the four numbers that answer 'am I making money today?' -->
+  <section class="cp-stats">
+    <div class="cp-stat">
+      <div class="lbl">bankroll</div>
+      <div class="val" id="cpBankroll">$--</div>
+      <div class="sub" id="cpBankrollSub">--</div>
+    </div>
+    <div class="cp-stat">
+      <div class="lbl">cash (pUSD)</div>
+      <div class="val" id="cpCash">$--</div>
+      <div class="sub">ready to deploy</div>
+    </div>
+    <div class="cp-stat">
+      <div class="lbl">in trades</div>
+      <div class="val" id="cpExposure">$--</div>
+      <div class="sub" id="cpOpenN">-- open</div>
+    </div>
+    <div class="cp-stat">
+      <div class="lbl">today p&amp;l</div>
+      <div class="val" id="cpToday">$0.00</div>
+      <div class="sub" id="cpTodaySub">-- closes</div>
+    </div>
+  </section>
+
+  <!-- Status strip -->
+  <div class="cp-strip">
+    <span class="cp-pill" id="cpLive"><span class="dot"></span><span>live: <b id="cpLiveTxt">--</b></span></span>
+    <span class="cp-pill" id="cpKs"><span class="dot"></span><span>ks: <b id="cpKsTxt">--</b></span></span>
+    <span class="cp-meta" id="cpCap">cap $-- / -- remaining</span>
+    <span class="cp-meta" id="cpWallets">-- of -- wallets active · -- paused</span>
+  </div>
+
+  <!-- Open positions -->
+  <section class="cp-section">
+    <h2>open positions</h2>
+    <table class="cp-table" id="cpOpenTable">
+      <thead>
+        <tr>
+          <th>market</th>
+          <th>wallets</th>
+          <th class="num">bet ($)</th>
+          <th class="num">shares</th>
+          <th class="num">avg entry</th>
+          <th class="num">realized</th>
+        </tr>
+      </thead>
+      <tbody><tr><td colspan="6" class="dim">loading...</td></tr></tbody>
+    </table>
+  </section>
+
+  <!-- Activity feed -->
+  <section class="cp-section">
+    <h2>recent activity</h2>
+    <ul class="cp-activity" id="cpActivity">
+      <li><span class="a-msg dim">loading...</span></li>
+    </ul>
+  </section>
+
+</main>
+
+<script>
+// ─── Helpers ────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+const fmtUsd = (n) => {
+  const v = Number(n);
+  if (!isFinite(v)) return '$--';
+  const sign = v >= 0 ? '+' : '-';
+  return `${sign}$${Math.abs(v).toFixed(2)}`;
+};
+const fmtUsdRaw = (n) => {
+  const v = Number(n);
+  if (!isFinite(v) || n == null) return '$--';
+  return `$${v.toFixed(2)}`;
+};
+const fmtTime = (iso) => {
+  if (!iso) return '--';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  } catch { return iso.slice(11, 19); }
+};
+
+async function api(path) {
+  const r = await fetch(path, { credentials: 'include' });
+  if (r.status === 401) { window.location.href = '/login'; throw new Error('unauth'); }
+  if (!r.ok) throw new Error(`${path}: ${r.status}`);
+  return r.json();
+}
+
+// ─── Top stats ─────────────────────────────────────────
+async function loadSummary() {
+  const s = await api('/api/copy_summary');
+  // Bankroll
+  $('cpBankroll').textContent = fmtUsdRaw(s.bankroll_usd);
+  const cap = s.daily_cap_usd, rem = s.daily_cap_remaining_usd;
+  $('cpBankrollSub').textContent = (cap != null && rem != null)
+    ? `cap $${Number(cap).toFixed(0)} · $${Number(rem).toFixed(0)} remaining`
+    : 'no cap data yet';
+  // Cash
+  $('cpCash').textContent = fmtUsdRaw(s.cash_usd);
+  // Exposure
+  $('cpExposure').textContent = fmtUsdRaw(s.live_exposure_usd);
+  $('cpOpenN').textContent = s.open_positions_n != null ? `${s.open_positions_n} open` : '-- open';
+  // Today
+  const t = Number(s.today_pnl_usd || 0);
+  const todayEl = $('cpToday');
+  todayEl.textContent = (t === 0 ? '$0.00' : fmtUsd(t));
+  todayEl.className = 'val ' + (t > 0 ? 'pos' : t < 0 ? 'neg' : 'dim');
+  $('cpTodaySub').textContent = `${s.n_closes_today || 0} closes`;
+  // Live indicator
+  const live = !!s.live_authorized;
+  const liveEl = $('cpLive');
+  liveEl.className = 'cp-pill ' + (live ? 'green' : 'amber');
+  $('cpLiveTxt').textContent = live ? 'yes' : 'no';
+  // KS
+  const ks = String(s.ks_status || 'green');
+  const ksEl = $('cpKs');
+  ksEl.className = 'cp-pill ' + (ks === 'red' ? 'red' : ks === 'amber' ? 'amber' : 'green');
+  $('cpKsTxt').textContent = ks;
+  // Cap line
+  $('cpCap').textContent = (cap != null && rem != null)
+    ? `cap $${Number(cap).toFixed(0)} · $${Number(rem).toFixed(0)} remaining today`
+    : '';
+  // Wallets line
+  const wTotal = s.n_wallets_total, wAct = s.n_wallets_with_activity, wPaused = s.n_paused_wallets;
+  $('cpWallets').textContent = (wTotal != null)
+    ? `${wAct ?? '--'} of ${wTotal} wallets active · ${wPaused ?? '--'} paused`
+    : '';
+  // Heartbeat freshness
+  const hb = s.heartbeat || {};
+  const stEl = $('cpStale');
+  if (hb.age_sec == null) {
+    stEl.className = 'cp-stale stale';
+    stEl.textContent = 'no heartbeat';
+  } else {
+    const age = Number(hb.age_sec);
+    const txt = age < 60 ? `${age}s` : age < 3600 ? `${Math.floor(age/60)}m` : `${Math.floor(age/3600)}h`;
+    stEl.className = 'cp-stale ' + (hb.is_fresh ? 'fresh' : 'stale');
+    stEl.textContent = `sync ${txt} ago`;
+  }
+}
+
+// ─── Open positions table ───────────────────────────────
+async function loadOpen() {
+  const data = await api('/api/copy_open');
+  const body = $('cpOpenTable').querySelector('tbody');
+  const rows = data.positions || [];
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="6" class="dim">no open positions</td></tr>';
+    return;
+  }
+  body.innerHTML = '';
+  rows.forEach(p => {
+    const tr = document.createElement('tr');
+    const sideCls = (p.side === 'BUY') ? 'side-buy' : (p.side === 'SELL') ? 'side-sell' : '';
+    const wallets = (p.wallets || []).slice(0, 3).join(', ') + ((p.wallets || []).length > 3 ? ` +${p.wallets.length - 3}` : '');
+    const realCls = p.realized_partial > 0 ? 'pos' : p.realized_partial < 0 ? 'neg' : 'dim';
+    const realTxt = (p.realized_partial == null || p.realized_partial === 0) ? '--' : fmtUsd(p.realized_partial);
+    tr.innerHTML = `
+      <td>
+        <span class="market">${escapeHtml(p.asset_label || '--')} <span class="${sideCls}">${p.side || ''}</span></span>
+        <span class="market-sub">${escapeHtml(p.market_slug || '')}</span>
+      </td>
+      <td><span class="wallets">${escapeHtml(wallets)}</span></td>
+      <td class="num">$${Number(p.cost_basis || 0).toFixed(2)}</td>
+      <td class="num">${Number(p.shares || 0).toFixed(2)}</td>
+      <td class="num">$${(p.avg_entry != null ? Number(p.avg_entry).toFixed(4) : '--')}</td>
+      <td class="num ${realCls}">${realTxt}</td>`;
+    body.appendChild(tr);
+  });
+}
+
+// ─── Activity feed ──────────────────────────────────────
+async function loadActivity() {
+  const data = await api('/api/copy_activity?limit=20');
+  const ul = $('cpActivity');
+  const ev = data.events || [];
+  if (!ev.length) {
+    ul.innerHTML = '<li><span class="a-msg dim">no activity yet</span></li>';
+    return;
+  }
+  ul.innerHTML = '';
+  ev.forEach(e => {
+    const li = document.createElement('li');
+    if (e.is_shadow) li.classList.add('shadow');
+    const action = (e.action || '').toUpperCase();
+    const amt = e.amount_usd != null ? `$${Number(e.amount_usd).toFixed(2)}` : '';
+    const px = e.price != null ? `@$${Number(e.price).toFixed(3)}` : '';
+    const wallet = e.wallet || '?';
+    const market = e.asset_label || '--';
+    const msg = `${wallet} · ${market} ${e.side || ''} ${amt} ${px}`.trim();
+    let pnlTxt = '';
+    let pnlCls = 'dim';
+    if (action === 'CLOSE' && e.realized_pnl_usd != null) {
+      const v = Number(e.realized_pnl_usd);
+      pnlTxt = fmtUsd(v);
+      pnlCls = v > 0 ? 'pos' : v < 0 ? 'neg' : 'dim';
+    }
+    li.innerHTML = `
+      <span class="a-time">${fmtTime(e.timestamp)}</span>
+      <span class="a-action ${action}">${action || '?'}</span>
+      <span class="a-msg">${escapeHtml(msg)}</span>
+      <span class="a-pnl ${pnlCls}">${pnlTxt}</span>`;
+    ul.appendChild(li);
+  });
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ─── Refresh loop ───────────────────────────────────────
+async function refresh() {
+  try {
+    await Promise.all([loadSummary(), loadOpen(), loadActivity()]);
+  } catch (e) {
+    if (e.message !== 'unauth') console.warn('refresh', e);
+  }
+}
+
+$('cpLogout').addEventListener('click', async (ev) => {
+  ev.preventDefault();
+  try { await fetch('/api/logout', { method: 'POST', credentials: 'include' }); } catch {}
+  window.location.href = '/login';
+});
+
+refresh();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
