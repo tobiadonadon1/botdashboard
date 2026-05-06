@@ -224,6 +224,7 @@ main.cp { padding: 16px; max-width: 1200px; margin: 0 auto; }
 <div class="cp-bar">
   <span class="cp-logo">POLYBOT // COPY</span>
   <span class="cp-stale" id="cpStale">--</span>
+  <span class="cp-stale" style="opacity:0.6;" title="dashboard build">build v3-debug</span>
   <span><a href="/bachelier" title="Old bachelier dashboard">bachelier ↗</a> &nbsp; <a href="#" id="cpLogout">logout</a></span>
 </div>
 
@@ -373,11 +374,21 @@ async function loadSummary() {
 
 // ─── Open positions table ───────────────────────────────
 async function loadOpen() {
-  const data = await api('/api/copy_open');
+  let data;
+  try {
+    data = await api('/api/copy_open');
+  } catch (e) {
+    const body = $('cpOpenTable').querySelector('tbody');
+    body.innerHTML = `<tr><td colspan="6" style="color:#ff7a85;">/api/copy_open ERROR: ${escapeHtml(String(e.message || e))}</td></tr>`;
+    return;
+  }
   const body = $('cpOpenTable').querySelector('tbody');
   const rows = data.positions || [];
+  console.log('[copy_open] response:', data, 'positions:', rows.length);
   if (!rows.length) {
-    body.innerHTML = '<tr><td colspan="6" class="dim">no open positions</td></tr>';
+    // Visible debug so the operator sees WHY: response keys + raw count.
+    const dbg = `(api returned ${Object.keys(data).join(', ')}; positions=${rows.length})`;
+    body.innerHTML = `<tr><td colspan="6" class="dim">no open positions  <span style="font-size:0.62rem;color:#5ba8c8;">${escapeHtml(dbg)}</span></td></tr>`;
     return;
   }
   body.innerHTML = '';
