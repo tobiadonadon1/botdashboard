@@ -462,11 +462,72 @@ async def copy_summary(
         except (TypeError, ValueError):
             pass
 
+    # Fall back to legacy bachelier-shape status fields if the v2 fields
+    # aren't being pushed yet. wallet_usdc → bankroll. Live exposure is
+    # COMPUTED from currently-open copy positions (sum of cost_basis).
+    bankroll = status.get("bankroll_usd")
+    if bankroll is None:
+        bankroll = status.get("wallet_usdc")
+    cash = status.get("cash_usd")
+    if cash is None:
+        # Best approximation: legacy status doesn't break out cash, but
+        # 'wallet_usdc' minus open exposure is close enough.
+        pass
+
+    # Compute live exposure from open copy positions (sum of OPEN minus CLOSE
+    # cost basis, only on rows with shares > 0). Cheap because we cap to
+    # last 30d and only need cost_basis aggregation.
+    live_exposure = 0.0
+    n_open = 0
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        pos_rows = s.select(
+            "trades",
+            columns="condition_id,action,shares,amount_usd,executed_price,intended_price,shadow",
+            filters={**_copy_trade_filter(uid), "timestamp": f"gte.{cutoff}", "shadow": "is.false"},
+            limit=10000,
+        )
+        from collections import defaultdict as _dd
+        grp = _dd(lambda: {"shares": 0.0, "cost": 0.0})
+        for r in pos_rows:
+            cid = r.get("condition_id")
+            if not cid:
+                continue
+            sh = float(r.get("shares") or 0)
+            px = r.get("executed_price")
+            if px is None:
+                px = r.get("intended_price")
+            try:
+                px = float(px) if px is not None else None
+            except (TypeError, ValueError):
+                px = None
+            amt = float(r.get("amount_usd") or 0)
+            a = (r.get("action") or "").upper()
+            if a == "OPEN":
+                grp[cid]["shares"] += sh
+                grp[cid]["cost"] += amt if amt else (sh * (px or 0))
+            elif a == "CLOSE":
+                grp[cid]["shares"] -= sh
+        for g in grp.values():
+            if g["shares"] > 1e-6:
+                live_exposure += g["cost"]
+                n_open += 1
+    except Exception:
+        live_exposure = None
+        n_open = 0
+
+    if status.get("live_exposure_usd") is not None:
+        live_exposure = float(status["live_exposure_usd"])
+
+    if cash is None and bankroll is not None and live_exposure is not None:
+        # Derived: cash = bankroll - in-trades
+        cash = max(0.0, float(bankroll) - float(live_exposure))
+
     return {
-        "bankroll_usd":       status.get("bankroll_usd"),
-        "cash_usd":           status.get("cash_usd"),
-        "live_exposure_usd":  status.get("live_exposure_usd"),
-        "open_positions_n":   status.get("open_positions_n"),
+        "bankroll_usd":       bankroll,
+        "cash_usd":           cash,
+        "live_exposure_usd":  live_exposure,
+        "open_positions_n":   status.get("open_positions_n") or n_open,
         "today_pnl_usd":      today_pnl,
         "today_pnl_shadow_usd": today_pnl_shadow,
         "n_closes_today":     n_closes_today,
