@@ -442,12 +442,10 @@ async def copy_summary(
         # Pre-migration: no bot_type / realized_pnl_usd columns. Treat as no data.
         rows = []
     today_pnl = 0.0
+    today_pnl_shadow = 0.0
     n_closes_today = 0
     for r in rows:
-        # Only count live (non-shadow) closes against today's PnL.
         is_shadow = bool(r.get("shadow")) or bool(r.get("is_shadow"))
-        if is_shadow:
-            continue
         action = str(r.get("action") or "").upper()
         if action != "CLOSE":
             continue
@@ -455,7 +453,11 @@ async def copy_summary(
         if v is None:
             v = r.get("pnl")
         try:
-            today_pnl += float(v or 0)
+            v = float(v or 0)
+            if is_shadow:
+                today_pnl_shadow += v
+            else:
+                today_pnl += v
             n_closes_today += 1
         except (TypeError, ValueError):
             pass
@@ -466,6 +468,7 @@ async def copy_summary(
         "live_exposure_usd":  status.get("live_exposure_usd"),
         "open_positions_n":   status.get("open_positions_n"),
         "today_pnl_usd":      today_pnl,
+        "today_pnl_shadow_usd": today_pnl_shadow,
         "n_closes_today":     n_closes_today,
         "daily_cap_usd":      status.get("daily_cap_usd"),
         "daily_cap_remaining_usd": status.get("daily_cap_remaining_usd"),
@@ -506,11 +509,13 @@ async def copy_open(polybot_session: Optional[str] = Cookie(None)):
         # Pre-migration: columns don't exist. Empty.
         return {"positions": [], "now_utc": datetime.now(timezone.utc).isoformat()}
 
-    # Group by condition_id, accumulate net shares + cost basis. Skip shadow rows.
+    # Group by condition_id, accumulate net shares + cost basis. Include
+    # shadow rows but tag the position so the UI can dim them - we'd rather
+    # show the operator their data with a 'shadow' badge than hide it
+    # entirely if the bot is mislabelling shadow vs live.
     pos: Dict[str, Dict] = {}
     for r in rows:
-        if bool(r.get("shadow")) or bool(r.get("is_shadow")):
-            continue
+        is_shadow = bool(r.get("shadow")) or bool(r.get("is_shadow"))
         cid = r.get("condition_id")
         if not cid:
             continue
@@ -541,7 +546,13 @@ async def copy_open(polybot_session: Optional[str] = Cookie(None)):
             "first_ts":     r.get("timestamp"),
             "last_ts":      r.get("timestamp"),
             "realized_so_far": 0.0,
+            "any_live":     False,
+            "any_shadow":   False,
         })
+        if is_shadow:
+            b["any_shadow"] = True
+        else:
+            b["any_live"] = True
         b["wallets"].update(wallets)
         b["last_ts"] = r.get("timestamp") or b["last_ts"]
         b["n_fills"] += 1
@@ -562,6 +573,9 @@ async def copy_open(polybot_session: Optional[str] = Cookie(None)):
         if b["net_shares"] <= 1e-6:
             continue
         avg_entry = (b["cost_basis"] / b["net_shares"]) if b["net_shares"] > 0 else None
+        # Shadow-only positions get tagged so the UI can dim them. A position
+        # mixed live + shadow (rare) is shown as live.
+        is_shadow_only = b["any_shadow"] and not b["any_live"]
         out.append({
             "condition_id": cid,
             "asset_label":  b["asset_label"],
@@ -576,6 +590,7 @@ async def copy_open(polybot_session: Optional[str] = Cookie(None)):
             "first_ts":     b["first_ts"],
             "last_ts":      b["last_ts"],
             "realized_partial": round(b["realized_so_far"], 2),
+            "is_shadow":    is_shadow_only,
         })
     out.sort(key=lambda p: p["last_ts"] or "", reverse=True)
     return {"positions": out, "now_utc": datetime.now(timezone.utc).isoformat()}

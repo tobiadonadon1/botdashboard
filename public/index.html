@@ -387,9 +387,11 @@ async function loadOpen() {
     const wallets = (p.wallets || []).slice(0, 3).join(', ') + ((p.wallets || []).length > 3 ? ` +${p.wallets.length - 3}` : '');
     const realCls = p.realized_partial > 0 ? 'pos' : p.realized_partial < 0 ? 'neg' : 'dim';
     const realTxt = (p.realized_partial == null || p.realized_partial === 0) ? '--' : fmtUsd(p.realized_partial);
+    const shadowBadge = p.is_shadow ? '<span style="font-size:0.55rem;letter-spacing:0.10em;color:#5ba8c8;border:1px solid rgba(91,168,200,0.4);padding:0 4px;border-radius:2px;margin-left:6px;">SHADOW</span>' : '';
+    if (p.is_shadow) tr.style.opacity = '0.65';
     tr.innerHTML = `
       <td>
-        <span class="market">${escapeHtml(p.asset_label || '--')} <span class="${sideCls}">${p.side || ''}</span></span>
+        <span class="market">${escapeHtml(p.asset_label || '--')} <span class="${sideCls}">${p.side || ''}</span>${shadowBadge}</span>
         <span class="market-sub">${escapeHtml(p.market_slug || '')}</span>
       </td>
       <td><span class="wallets">${escapeHtml(wallets)}</span></td>
