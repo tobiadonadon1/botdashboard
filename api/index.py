@@ -434,7 +434,7 @@ async def copy_summary(
     try:
         rows = s.select(
             "trades",
-            columns="action,realized_pnl_usd,pnl,timestamp,is_shadow,shadow",
+            columns="action,realized_pnl_usd,pnl,timestamp,shadow",
             filters={**_copy_trade_filter(uid), "timestamp": f"gte.{midnight.isoformat()}"},
             limit=2000,
         )
@@ -500,7 +500,7 @@ async def copy_open(polybot_session: Optional[str] = Cookie(None)):
     try:
         rows = s.select(
             "trades",
-            columns="trade_id,timestamp,wallet_label,wallet_address,asset_label,market_slug,condition_id,token_id,side,action,amount_usd,intended_price,executed_price,shares,realized_pnl_usd,is_shadow,shadow",
+            columns="trade_id,timestamp,wallet_label,wallet_address,asset_label,market_slug,condition_id,token_id,side,action,amount_usd,intended_price,executed_price,shares,realized_pnl_usd,shadow",
             filters={**_copy_trade_filter(uid), "timestamp": f"gte.{cutoff}"},
             order="timestamp.asc",
             limit=10000,
@@ -609,7 +609,7 @@ async def copy_activity(
     try:
         rows = s.select(
             "trades",
-            columns="trade_id,timestamp,wallet_label,wallet_address,asset_label,market_slug,condition_id,side,action,amount_usd,executed_price,intended_price,shares,realized_pnl_usd,is_shadow,shadow,latency_ms",
+            columns="trade_id,timestamp,wallet_label,wallet_address,asset_label,market_slug,condition_id,side,action,amount_usd,executed_price,intended_price,shares,realized_pnl_usd,shadow,latency_ms",
             filters=_copy_trade_filter(uid),
             order="timestamp.desc",
             limit=int(limit),
